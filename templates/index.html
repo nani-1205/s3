@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>S3 Data Migration Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="dashboard">
+        <div class="header">
+            <h1>🚀 S3 Data Migration Dashboard</h1>
+            <p>Real-time data transfer monitoring and analytics</p>
+        </div>
+
+        <div class="main-content">
+            <div class="config-section">
+                <div class="config-card">
+                    <h3>📤 Source Configuration</h3>
+                    <div class="detail"><span class="label">Account:</span> <span id="source-account">{{ source_account_id if source_account_id else 'N/A' }}</span></div>
+                    <div class="detail"><span class="label">Region:</span> <span id="source-region">{{ env_vars.SOURCE_S3_REGION }}</span></div>
+                    <div class="detail"><span class="label">Bucket:</span> <span id="source-bucket">{{ env_vars.SOURCE_S3_BUCKET }}</span></div>
+                    <div class="detail"><span class="label">Prefix:</span> <span id="source-prefix">{{ env_vars.SOURCE_S3_PREFIX }}</span></div>
+                </div>
+
+                <div class="config-card" style="background: linear-gradient(135deg, #11998e, #38ef7d);">
+                    <h3>📥 Destination Configuration</h3>
+                    <div class="detail"><span class="label">Account:</span> <span id="dest-account">{{ dest_account_id if dest_account_id else 'N/A' }}</span></div>
+                    <div class="detail"><span class="label">Region:</span> <span id="dest-region">{{ env_vars.DEST_S3_REGION }}</span></div>
+                    <div class="detail"><span class="label">Bucket:</span> <span id="dest-bucket">{{ env_vars.DEST_S3_BUCKET }}</span></div>
+                    <div class="detail"><span class="label">Prefix:</span> <span id="dest-prefix">{{ env_vars.DEST_S3_PREFIX }}</span></div>
+                </div>
+            </div>
+
+            <div class="control-panel">
+                <button id="startMigrationButton" class="start-button">
+                    Start Migration
+                </button>
+            </div>
+
+            <div id="progressSection" class="progress-section">
+                <div class="progress-container">
+                    <div class="progress-header">
+                        <h3>📊 Migration Progress</h3>
+                        <span id="progressPercentageDisplay">0%</span>
+                    </div>
+                    <div class="progress-bar-wrapper">
+                        <div id="mainProgressBar" class="progress-bar">0%</div>
+                    </div>
+                    <div class="eta-display">
+                        <div>⏱️ Estimated Time Remaining</div>
+                        <div class="eta-value" id="etaValueDisplay">Calculating...</div>
+                    </div>
+                </div>
+
+                <div id="currentFileInfoDisplay" class="current-file" style="display: none;">
+                    <div class="file-name" id="currentFileNameDisplay">No file currently transferring</div>
+                    <div class="file-size" id="currentFileSizeDisplay">0 MB</div>
+                </div>
+
+                <div class="messages-container">
+                    <div id="messagesLogArea">
+                        <div class="message info">Ready to start migration. Click the button above to begin.</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const startButton = document.getElementById('startMigrationButton');
+        const progressSection = document.getElementById('progressSection');
+        const progressBarElement = document.getElementById('mainProgressBar');
+        const progressPercentageElement = document.getElementById('progressPercentageDisplay');
+        const etaValueDisplayElement = document.getElementById('etaValueDisplay');
+        const currentFileInfoElement = document.getElementById('currentFileInfoDisplay');
+        const currentFileNameElement = document.getElementById('currentFileNameDisplay');
+        const currentFileSizeElement = document.getElementById('currentFileSizeDisplay');
+        const messagesLogContainer = document.getElementById('messagesLogArea');
+
+        let totalFilesToProcess = 0;
+        let totalBytesToProcess = 0;
+        let migrationStartTime;
+        let eventSource;
+
+        function formatBytes(bytes, decimals = 2) {
+            if (bytes === undefined || bytes === null || isNaN(bytes) || bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const dm = decimals < 0 ? 0 : decimals;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            if (i >= sizes.length) return parseFloat((bytes / Math.pow(k, sizes.length - 1)).toFixed(dm)) + ' ' + sizes[sizes.length -1];
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+        }
+
+        function formatEta(seconds) {
+            if (seconds === undefined || seconds === null || !isFinite(seconds) || seconds < 0) return 'Calculating...';
+            if (progressBarElement.style.width === '100%') return 'Completed!'; // Check before almost done
+            if (seconds === 0) return 'Almost done!';
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            let etaString = '';
+            if (h > 0) etaString += `${h}h `;
+            if (m > 0) etaString += `${m}m `;
+            etaString += `${s}s`;
+            return etaString.trim() || '0s';
+        }
+
+        function addMessage(message, type = 'info') {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}`;
+            messageDiv.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            messagesLogContainer.appendChild(messageDiv);
+            messagesLogContainer.scrollTop = messagesLogContainer.scrollHeight;
+            if (messagesLogContainer.children.length > 150) {
+                messagesLogContainer.removeChild(messagesLogContainer.firstChild);
+            }
+        }
+
+        function resetUIForNewRun() {
+            startButton.innerHTML = 'Start Migration';
+            startButton.disabled = false;
+            progressBarElement.style.width = '0%';
+            progressBarElement.textContent = '0%';
+            progressBarElement.style.background = '';
+            progressPercentageElement.textContent = '0%';
+            etaValueDisplayElement.textContent = 'Calculating...';
+            currentFileInfoElement.style.display = 'none';
+            currentFileNameElement.textContent = 'No file currently transferring';
+            currentFileSizeElement.textContent = '';
+            messagesLogContainer.innerHTML = '<div class="message info">Ready to start migration. Click the button above to begin.</div>';
+        }
+
+        function handleServerEvent(event) {
+            const data = JSON.parse(event.data);
+
+            if (data.event_type === "log") {
+                addMessage(data.message_text, data.message_type || 'info');
+            } else if (data.event_type === "error") {
+                 addMessage(data.error_message, 'error');
+                if (data.critical || data.status === 'failed') {
+                    progressBarElement.style.background = '#dc3545';
+                    if(eventSource) eventSource.close();
+                    startButton.innerHTML = 'Migration Failed ❌';
+                    startButton.disabled = true;
+                }
+                return;
+            }
+
+            switch (data.event_type) {
+                case "initial_stats":
+                    migrationStartTime = Date.now();
+                    totalFilesToProcess = data.total_files;
+                    totalBytesToProcess = data.total_size_bytes;
+                    addMessage(data.message || `Found ${totalFilesToProcess} files, total size ${formatBytes(totalBytesToProcess)}.`, 'info');
+                    if (progressBarElement.style.width === '0%') {
+                         etaValueDisplayElement.textContent = totalFilesToProcess > 0 ? 'Calculating...' : 'No files';
+                    }
+                    break;
+                case "file_start":
+                    currentFileInfoElement.style.display = 'block';
+                    currentFileNameElement.innerHTML = `📁 ${data.file_name}`; 
+                    currentFileSizeElement.textContent = `Size: ${formatBytes(data.file_size_bytes)}`;
+                    break;
+                case "file_result":
+                    const currentProgress = data.progress_percentage_files || 0;
+                    progressBarElement.style.width = currentProgress + '%';
+                    progressBarElement.textContent = Math.round(currentProgress) + '%';
+                    progressPercentageElement.textContent = Math.round(currentProgress) + '%';
+                    etaValueDisplayElement.textContent = formatEta(data.eta_seconds);
+                    if (data.status === "success") {
+                         addMessage(`Copied: ${data.file_name}`, 'success');
+                    } else {
+                        addMessage(`Failed: ${data.file_name}. Error: ${data.error_message}`, 'error');
+                    }
+                    break;
+                case "migration_complete":
+                    addMessage(data.final_message, data.status === "completed_fully" ? 'success' : 'warning');
+                    progressBarElement.style.width = '100%';
+                    progressBarElement.textContent = '100%';
+                    progressPercentageElement.textContent = '100%';
+                    if (data.status === "completed_fully") {
+                        progressBarElement.style.background = '';
+                        startButton.innerHTML = 'Migration Complete ✅';
+                    } else {
+                         progressBarElement.style.background = '#ffc107';
+                         startButton.innerHTML = 'Partially Complete ⚠️';
+                    }
+                    etaValueDisplayElement.textContent = `Done in ${formatEta(data.total_time_seconds)}.`;
+                    currentFileInfoElement.style.display = 'none';
+                    if(eventSource) eventSource.close();
+                    startButton.disabled = false;
+                    break;
+            }
+        }
+
+        startButton.addEventListener('click', () => {
+            startButton.innerHTML = '<span class="loading-spinner"></span>Initializing...';
+            startButton.disabled = true;
+            progressSection.style.display = 'block';
+            resetUIForNewRun(); 
+            addMessage('Initializing migration process...', 'info');
+            if(eventSource) {
+                eventSource.close();
+            }
+            eventSource = new EventSource("{{ url_for('start_migration') }}");
+            eventSource.onmessage = handleServerEvent;
+            eventSource.onerror = function(err) {
+                console.error("EventSource failed:", err);
+                addMessage('Connection to server lost or migration stream error. Check console and server logs.', 'error');
+                progressBarElement.style.background = '#dc3545';
+                if(eventSource) eventSource.close();
+                startButton.innerHTML = 'Start Migration';
+                startButton.disabled = false;
+            };
+        });
+
+        document.addEventListener('DOMContentLoaded', () => {
+            progressSection.style.display = 'none'; 
+        });
+    </script>
+</body>
+</html>

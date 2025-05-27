@@ -1,0 +1,4 @@
+Flask
+boto3
+python-dotenv
+gunicorn # For production-like deployment, optional for local dev
