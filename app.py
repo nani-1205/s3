@@ -26,7 +26,7 @@ DEST_S3_PREFIX = os.getenv("DEST_S3_PREFIX", "")
 def get_aws_account_id(access_key, secret_key, region):
     try:
         sts_client = boto3.client(
-            'sts',
+            'sts',  #secure token service
             aws_access_key_id=access_key,
             aws_secret_access_key=secret_key,
             region_name=region if region else 'us-east-1'
