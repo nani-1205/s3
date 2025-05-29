@@ -2,8 +2,8 @@
 
 A Flask-based web application to migrate specific data from an AWS S3 bucket in one AWS account to another S3 bucket, potentially in a different AWS account and region. The application provides a real-time dashboard UI to monitor the migration progress.
 
-![Dashboard Screenshot](placeholder_screenshot.png) 
-*(Suggestion: Replace placeholder_screenshot.png with an actual screenshot of your UI)*
+![Screenshot_29-5-2025_173421_18 61 78 72](https://github.com/user-attachments/assets/b139ab55-d799-4f57-8482-bdded309c477)
+
 
 ## Features
 
