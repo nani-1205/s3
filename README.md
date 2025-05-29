@@ -1,8 +1,8 @@
-# AWS S3 Data Migration 
+# AWS S3 Data Migration Dashboard
 
 A Flask-based web application to migrate specific data from an AWS S3 bucket in one AWS account to another S3 bucket, potentially in a different AWS account and region. The application provides a real-time dashboard UI to monitor the migration progress.
 
-![Screenshot_29-5-2025_173421_18 61 78 72](https://github.com/user-attachments/assets/b139ab55-d799-4f57-8482-bdded309c477)
+![Dashboard Screenshot](https://github.com/user-attachments/assets/b139ab55-d799-4f57-8482-bdded309c477)
 
 
 ## Features
@@ -33,7 +33,7 @@ A Flask-based web application to migrate specific data from an AWS S3 bucket in 
 
 1.  **Clone the Repository (if applicable) or Create Project Directory:**
     ```bash
-    # If cloned:
+    # Example if cloned:
     # git clone -b V-2 https://github.com/nani-1205/s3.git
     # cd s3_migration_app
 
@@ -57,54 +57,151 @@ A Flask-based web application to migrate specific data from an AWS S3 bucket in 
     ```
 
 4.  **Configure Environment Variables:**
-    
+    Create a `.env` file in the root of the `s3_migration_app` directory (e.g., by copying `.env.example` if provided, or creating a new one).
     ```bash
+    # Example: touch .env
+    # Then edit the .env file:
     vi .env
     ```
-    *   Edit the `.env` file with your specific AWS credentials, S3 bucket details, and prefixes:
+    *   Populate the `.env` file with your specific AWS credentials, S3 bucket details, and prefixes:
 
         ```dotenv
         # Source AWS Account & S3 Details
-        # If these are commented out or not present, the app will attempt to use
-        # the EC2 instance role or default AWS CLI profile credentials.
+        # If SOURCE_AWS_ACCESS_KEY_ID and SOURCE_AWS_SECRET_ACCESS_KEY are commented out or not present,
+        # the app will attempt to use the EC2 instance role or default AWS CLI profile credentials
+        # for accessing the source bucket.
         # SOURCE_AWS_ACCESS_KEY_ID="YOUR_SOURCE_ACCOUNT_ACCESS_KEY"
         # SOURCE_AWS_SECRET_ACCESS_KEY="YOUR_SOURCE_ACCOUNT_SECRET_KEY"
-        SOURCE_S3_REGION="ap-south-1" # e.g., us-east-1
-        SOURCE_S3_BUCKET="your-source-bucket-name"
-        SOURCE_S3_PREFIX="your/source/prefix/" # Include trailing '/' for folder-like prefixes
+        SOURCE_S3_REGION="ap-south-1" # e.g., Source bucket's region
+        SOURCE_S3_BUCKET="s3migrationtask"
+        SOURCE_S3_PREFIX="msi/" # e.g., everything inside the 'msi/' folder
 
         # Destination AWS Account & S3 Details
-        # If these are commented out or not present, the app will attempt to use
-        # the EC2 instance role or default AWS CLI profile credentials.
-        # DEST_AWS_ACCESS_KEY_ID="YOUR_DEST_ACCOUNT_ACCESS_KEY"
-        # DEST_AWS_SECRET_ACCESS_KEY="YOUR_DEST_ACCOUNT_SECRET_KEY"
-        DEST_S3_REGION="ap-south-2" # e.g., us-west-2
-        DEST_S3_BUCKET="your-destination-bucket-name"
-        DEST_S3_PREFIX="your/destination/prefix/" # Include trailing '/'
+        # If DEST_AWS_ACCESS_KEY_ID and DEST_AWS_SECRET_ACCESS_KEY are commented out or not present,
+        # the app will attempt to use the EC2 instance role or default AWS CLI profile credentials
+        # for accessing the destination bucket.
+        # DEST_AWS_ACCESS_KEY_ID="YOUR_DESTINATION_ACCOUNT_IAM_USER_ACCESS_KEY"
+        # DEST_AWS_SECRET_ACCESS_KEY="YOUR_DESTINATION_ACCOUNT_IAM_USER_SECRET_KEY"
+        DEST_S3_REGION="me-central-1" # e.g., Destination bucket's region
+        DEST_S3_BUCKET="aidattu"
+        DEST_S3_PREFIX="mig/" # e.g., copy into the 'mig/' folder
 
         # Flask specific
         FLASK_APP=app.py
         FLASK_DEBUG=True # Set to False for production
         ```
     *   **Important:**
-        *   If running on an EC2 instance with an IAM Role attached, you can often omit the `*_AWS_ACCESS_KEY_ID` and `*_AWS_SECRET_ACCESS_KEY` lines, and Boto3 will automatically use the instance role credentials. The IAM role will then need the necessary permissions.
-        *   Ensure prefixes end with a `/` if you intend to copy the contents of a "folder".
+        *   If running the Flask application on an EC2 instance with an IAM Role attached, you can often omit the `*_AWS_ACCESS_KEY_ID` and `*_AWS_SECRET_ACCESS_KEY` lines for the account where the EC2 instance resides. Boto3 will automatically use the instance role credentials. The IAM role will then need the necessary permissions outlined below.
+        *   Ensure prefixes end with a `/` if you intend to copy the contents of a "folder". If copying a single object or objects matching a prefix without a trailing slash, adjust accordingly.
 
 5.  **Configure AWS IAM Permissions:**
 
-    This application requires specific IAM permissions for both the source and destination AWS accounts. The principal performing the migration (either an IAM user whose keys are in `.env` or the EC2 instance role) needs:
+    The principal performing the migration (e.g., an IAM user whose keys are in `.env`, or an EC2 instance role) needs permissions in both the source and destination accounts.
 
-    *   **Permissions in the Destination Account (for the principal running the script):**
-        *   Read access to the source S3 bucket/prefix (e.g., `s3:GetObject`, `s3:ListBucket`).
-        *   Write access to the destination S3 bucket/prefix (e.g., `s3:PutObject`, `s3:PutObjectAcl`).
-        *   (Optional) KMS permissions if Customer Managed Keys (CMKs) are used for S3 bucket encryption.
+    **a. Destination Account IAM Policy (Account: `3407-5282-6549`)**
 
-        *See example IAM policy in previous discussions or `example_iam_policy_destination.json` (if you create one).*
+    This policy should be attached to the IAM user (`s3` in your case) or IAM Role (if running on EC2) in the **Destination Account** that will be executing the migration script.
 
-    *   **Bucket Policy on the Source S3 Bucket (in the Source Account):**
-        *   This policy must grant the principal from the destination account (e.g., `arn:aws:iam::DESTINATION_ACCOUNT_ID:user/YOUR_USER` or `arn:aws:iam::DESTINATION_ACCOUNT_ID:role/YOUR_EC2_ROLE`) permissions to `s3:GetObject` on the source objects and `s3:ListBucket` on the source bucket (restricted to the source prefix).
+    ```json
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "AllowReadFromSourceBucketForMigration",
+                "Effect": "Allow",
+                "Action": [
+                    "s3:GetObject"
+                ],
+                "Resource": "arn:aws:s3:::s3migrationtask/msi/*"
+            },
+            {
+                "Sid": "AllowListSourceBucketForMigration",
+                "Effect": "Allow",
+                "Action": "s3:ListBucket",
+                "Resource": "arn:aws:s3:::s3migrationtask",
+                "Condition": {
+                    "StringLike": {
+                        "s3:prefix": [
+                            "msi/*",
+                            "msi/"
+                        ]
+                    }
+                }
+            },
+            {
+                "Sid": "AllowWriteToDestinationBucketForMigration",
+                "Effect": "Allow",
+                "Action": [
+                    "s3:PutObject",
+                    "s3:PutObjectAcl" 
+                ],
+                "Resource": "arn:aws:s3:::aidattu/mig/*"
+            },
+            {
+                "Sid": "AllowListDestinationBucketForMigration",
+                "Effect": "Allow",
+                "Action": "s3:ListBucket",
+                "Resource": "arn:aws:s3:::aidattu",
+                "Condition": {
+                    "StringLike": {
+                        "s3:prefix": [
+                            "mig/*",
+                            "mig/",
+                            "" 
+                        ]
+                    }
+                }
+            }
+            // If either source or destination bucket uses SSE-KMS with Customer Managed Keys (CMKs),
+            // add necessary kms:Decrypt (for source CMK) and/or 
+            // kms:GenerateDataKey*, kms:Encrypt (for destination CMK) permissions here,
+            // targeting the respective KMS Key ARNs.
+        ]
+    }
+    ```
+    *This policy allows the IAM user/role to read the specified prefix from the source bucket (`s3migrationtask/msi/*`) and write to the specified prefix in its own destination bucket (`aidattu/mig/*`).*
 
-        *See example S3 bucket policy in previous discussions or `example_s3_bucket_policy_source.json` (if you create one).*
+    **b. Source S3 Bucket Policy (Bucket: `s3migrationtask` in Account: `9054-1825-7358`)**
+
+    This policy must be applied to the **Source S3 Bucket** (`s3migrationtask`) in the **Source Account**.
+
+    ```json
+    {
+        "Version": "2012-10-17",
+        "Statement": [
+            {
+                "Sid": "AllowDestinationAccountS3UserToReadObjects",
+                "Effect": "Allow",
+                "Principal": {
+                    "AWS": "arn:aws:iam::340752826549:user/s3" 
+                },
+                "Action": "s3:GetObject",
+                "Resource": "arn:aws:s3:::s3migrationtask/msi/*"
+            },
+            {
+                "Sid": "AllowDestinationAccountS3UserToListBucket",
+                "Effect": "Allow",
+                "Principal": {
+                    "AWS": "arn:aws:iam::340752826549:user/s3" 
+                },
+                "Action": "s3:ListBucket",
+                "Resource": "arn:aws:s3:::s3migrationtask",
+                "Condition": {
+                    "StringLike": {
+                        "s3:prefix": [
+                            "msi/*",
+                            "msi/"
+                        ]
+                    }
+                }
+            }
+            // If you have other existing statements in this bucket policy,
+            // ensure they are correctly formatted and separated by a comma.
+        ]
+    }
+    ```
+    *Replace `arn:aws:iam::340752826549:user/s3` with the correct ARN if the principal in the destination account is an IAM Role (e.g., `arn:aws:iam::340752826549:role/YourEC2MigrationRole`).*
+    *This policy grants the specified IAM user/role from the destination account (`3407-5282-6549`) permission to read objects and list the contents of the `msi/` prefix within the `s3migrationtask` bucket.*
 
 ## Running the Application
 
@@ -156,12 +253,9 @@ A Flask-based web application to migrate specific data from an AWS S3 bucket in 
 ## Troubleshooting "Access Denied" Errors
 
 "Access Denied" errors during migration usually indicate IAM permission issues. Check the following:
-1.  **IAM Policy on the Principal Performing the Migration (Destination Account):** Ensure it has `s3:GetObject` and `s3:ListBucket` for the source bucket/prefix, AND `s3:PutObject` for the destination bucket/prefix.
-2.  **Bucket Policy on the Source S3 Bucket:** Ensure it grants the principal from the destination account the necessary `s3:GetObject` and `s3:ListBucket` permissions.
+1.  **IAM Policy on the Principal Performing the Migration (Destination Account):** Ensure it has the permissions as shown in the example above.
+2.  **Bucket Policy on the Source S3 Bucket:** Ensure it grants the principal from the destination account the necessary permissions as shown in the example above.
 3.  **Bucket Policy on the Destination S3 Bucket:** Ensure it doesn't have explicit `Deny` statements that override the IAM user's permissions.
 4.  **KMS Key Policies:** If either bucket uses SSE-KMS with Customer Managed Keys, ensure the relevant KMS key policies and IAM permissions for KMS actions (`kms:Decrypt`, `kms:GenerateDataKey*`, `kms:Encrypt`) are correctly configured for cross-account access if needed.
 5.  **VPC Endpoint Policies:** If running in a VPC with S3 Gateway Endpoints, check the endpoint policies.
 6.  **Service Control Policies (SCPs):** If using AWS Organizations, check for restrictive SCPs.
-
-
-
