@@ -34,7 +34,7 @@ A Flask-based web application to migrate specific data from an AWS S3 bucket in 
 1.  **Clone the Repository (if applicable) or Create Project Directory:**
     ```bash
     # If cloned:
-    # git clone <repository_url>
+    # git clone -b V-2 https://github.com/nani-1205/s3.git
     # cd s3_migration_app
 
     # If creating manually:
