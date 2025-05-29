@@ -22,13 +22,13 @@ DEST_S3_BUCKET = os.getenv("DEST_S3_BUCKET")
 DEST_S3_PREFIX = os.getenv("DEST_S3_PREFIX", "")
 
 # --- Shared Migration State ---
-MIGRATION_STATE = {} # Will be initialized by reset_migration_state()
+MIGRATION_STATE = {} 
 STATE_LOCK = threading.Lock()
 MAX_LOG_MESSAGES = 100
 
 def reset_migration_state():
     with STATE_LOCK:
-        MIGRATION_STATE.clear() # Clear all old keys
+        MIGRATION_STATE.clear() 
         MIGRATION_STATE.update({
             "is_running": False,
             "total_files": 0,
@@ -50,15 +50,12 @@ def reset_migration_state():
 
 def add_log_to_state(text, type='info'):
     with STATE_LOCK:
-        # Get current time once
         current_time_str = time.strftime('%H:%M:%S')
         log_entry = {"text": f"[{current_time_str}] {text}", "type": type, "timestamp": time.time()}
         
         MIGRATION_STATE["log_messages"].append(log_entry)
-        # Keep only the most recent logs
         MIGRATION_STATE["log_messages"] = sorted(MIGRATION_STATE["log_messages"], key=lambda x: x["timestamp"])[-MAX_LOG_MESSAGES:]
         MIGRATION_STATE["last_updated"] = time.time()
-
 
 def update_migration_state(updates_dict):
     with STATE_LOCK:
@@ -68,17 +65,15 @@ def update_migration_state(updates_dict):
 # --- AWS Helper Functions ---
 def get_aws_account_id(access_key, secret_key, region_name):
     try:
-        if not access_key or not secret_key: # Handle case where keys might be None (e.g. using instance role)
+        if not access_key or not secret_key:
             return "N/A (Keys Not Provided)"
         sts_client = boto3.client(
             'sts', aws_access_key_id=access_key, aws_secret_access_key=secret_key,
-            region_name=region_name if region_name else 'us-east-1' # STS is mostly global
+            region_name=region_name if region_name else 'us-east-1'
         )
         return sts_client.get_caller_identity().get('Account')
     except botocore.exceptions.ClientError as e:
         app.logger.error(f"STS ClientError getting Account ID (Region: {region_name}): {e.response.get('Error', {}).get('Message', str(e))}")
-        if "InvalidClientTokenId" in str(e) or "SignatureDoesNotMatch" in str(e):
-            app.logger.error("This often means AWS Keys are incorrect or malformed for STS.")
         return "N/A (STS Error)"
     except Exception as e:
         app.logger.error(f"Could not get Account ID (Region: {region_name}): {str(e)}")
@@ -90,7 +85,6 @@ def get_s3_client_with_env_fallback(access_key_env_name, secret_key_env_name, re
     region = os.getenv(region_env_name)
 
     if access_key and secret_key and region:
-        # app.logger.debug(f"Using credentials from .env for {client_type} S3 client.")
         return boto3.client(
             's3',
             aws_access_key_id=access_key,
@@ -99,7 +93,6 @@ def get_s3_client_with_env_fallback(access_key_env_name, secret_key_env_name, re
             config=botocore.client.Config(signature_version='s3v4', retries={'max_attempts': 5, 'mode': 'standard'})
         )
     elif region:
-        # app.logger.debug(f"Using default credential provider chain (e.g., instance role) for {client_type} S3 client in region {region}.")
         return boto3.client(
             's3',
             region_name=region,
@@ -112,7 +105,6 @@ def get_s3_client_with_env_fallback(access_key_env_name, secret_key_env_name, re
 
 # --- Core Migration Logic ---
 def do_actual_migration_task():
-    # Reset state specific to a new run, but keep logs if desired or clear them.
     with STATE_LOCK:
         MIGRATION_STATE["is_running"] = True
         MIGRATION_STATE["start_time"] = time.time()
@@ -125,9 +117,9 @@ def do_actual_migration_task():
         MIGRATION_STATE["eta_seconds"] = 0
         MIGRATION_STATE["current_file_name"] = None
         MIGRATION_STATE["current_file_size_bytes"] = 0
-        MIGRATION_STATE["completion_status"] = None # Mark as not completed yet
+        MIGRATION_STATE["completion_status"] = None
         MIGRATION_STATE["final_message"] = None
-        MIGRATION_STATE["log_messages"] = [] # Clear logs for a new run
+        MIGRATION_STATE["log_messages"] = [] 
         MIGRATION_STATE["last_updated"] = time.time()
     add_log_to_state('Migration process started in background thread.', 'info')
 
@@ -150,7 +142,7 @@ def do_actual_migration_task():
     try:
         add_log_to_state(f'Listing objects from s3://{SOURCE_S3_BUCKET}/{source_prefix_effective} ...', 'info')
         objects_to_copy_meta = []
-        current_total_size_bytes_scan = 0 # Use a local var for scan
+        current_total_size_bytes_scan = 0
         paginator = source_s3.get_paginator('list_objects_v2')
         list_args = {'Bucket': SOURCE_S3_BUCKET}
         if source_prefix_effective: list_args['Prefix'] = source_prefix_effective
@@ -160,7 +152,7 @@ def do_actual_migration_task():
             if "Contents" in page:
                 for obj in page["Contents"]:
                     if source_prefix_effective and obj['Key'] == source_prefix_effective and obj.get('Size', 0) == 0: continue
-                    if obj.get('Size', 0) > 0: # Only consider actual files
+                    if obj.get('Size', 0) > 0:
                         objects_to_copy_meta.append({'Key': obj['Key'], 'Size': obj['Size']})
                         current_total_size_bytes_scan += obj['Size']
         
@@ -180,10 +172,10 @@ def do_actual_migration_task():
 
         copied_count = 0
         failed_count = 0
-        data_transferred_this_run = 0 # Track for this run
+        data_transferred_this_run = 0
 
         for i, obj_meta in enumerate(objects_to_copy_meta):
-            with STATE_LOCK: # Check if still running inside loop
+            with STATE_LOCK:
                 if not MIGRATION_STATE["is_running"]:
                     add_log_to_state("Migration was stopped or cancelled.", "warning")
                     break
@@ -198,17 +190,14 @@ def do_actual_migration_task():
 
             relative_key = source_key[len(source_prefix_effective):] if source_prefix_effective and source_key.startswith(source_prefix_effective) else source_key
             relative_key = relative_key.lstrip('/')
-            
             destination_key = dest_prefix_effective.rstrip('/') + '/' + relative_key if dest_prefix_effective else relative_key
             destination_key = destination_key.replace('//', '/')
-
 
             copy_source = {'Bucket': SOURCE_S3_BUCKET, 'Key': source_key}
             try:
                 dest_s3.copy_object(CopySource=copy_source, Bucket=DEST_S3_BUCKET, Key=destination_key)
                 copied_count += 1
                 data_transferred_this_run += file_size_bytes
-                # add_log_to_state(f'Copied: {source_key.split("/")[-1]}', 'success') # Can be too verbose for many files
             except Exception as e:
                 failed_count += 1
                 err_msg_file = f'Error copying {source_key.split("/")[-1]}: {str(e)}'
@@ -231,7 +220,7 @@ def do_actual_migration_task():
                 "transfer_speed_bps": speed_bps_now,
                 "eta_seconds": eta_now
             })
-            time.sleep(0.005) # Tiny sleep to yield CPU, reduce if not needed
+            time.sleep(0.005)
 
         final_msg_text = f"Migration run finished. Copied {copied_count} of {MIGRATION_STATE['total_files']} objects."
         final_status_now = "completed_fully"
@@ -241,11 +230,8 @@ def do_actual_migration_task():
         
         add_log_to_state(final_msg_text, 'success' if failed_count == 0 else 'warning')
         update_migration_state({
-            "is_running": False, 
-            "completion_status": final_status_now, 
-            "final_message": final_msg_text,
-            "current_file_name": None, # Clear current file on completion
-            "current_file_size_bytes": 0
+            "is_running": False, "completion_status": final_status_now, "final_message": final_msg_text,
+            "current_file_name": None, "current_file_size_bytes": 0
         })
 
     except Exception as e:
@@ -258,7 +244,7 @@ def do_actual_migration_task():
 
 # --- Flask Routes ---
 @app.route('/')
-def index_route():
+def index_route(): # Changed function name to avoid conflict if you have other 'index'
     env_vars_display = {
         "SOURCE_S3_REGION": SOURCE_S3_REGION, "SOURCE_S3_BUCKET": SOURCE_S3_BUCKET, "SOURCE_S3_PREFIX": SOURCE_S3_PREFIX,
         "DEST_S3_REGION": DEST_S3_REGION, "DEST_S3_BUCKET": DEST_S3_BUCKET, "DEST_S3_PREFIX": DEST_S3_PREFIX,
@@ -268,7 +254,7 @@ def index_route():
     return render_template('index.html', env_vars=env_vars_display, source_account_id=src_acc_id, dest_account_id=dest_acc_id)
 
 @app.route('/trigger-migration', methods=['POST'])
-def trigger_migration_route():
+def trigger_migration_route(): # This is the correct endpoint name
     with STATE_LOCK:
         if MIGRATION_STATE.get("is_running", False):
             return jsonify({"status": "error", "message": "A migration is already in progress."}), 409
@@ -281,28 +267,23 @@ def trigger_migration_route():
 @app.route('/migration-status-stream')
 def migration_status_stream():
     def generate_status_updates():
-        last_state_sent_json = "" # Store JSON representation of last sent state
+        last_state_sent_json = "" 
         while True:
             with STATE_LOCK:
-                # Create a snapshot for sending to avoid holding lock for too long
                 current_state_snapshot = dict(MIGRATION_STATE) 
-                current_state_snapshot["log_messages"] = list(MIGRATION_STATE.get("log_messages", [])) # Ensure it's a list copy
+                current_state_snapshot["log_messages"] = list(MIGRATION_STATE.get("log_messages", []))
             
             current_state_json = json.dumps(current_state_snapshot)
 
-            # Send if state has changed
             if current_state_json != last_state_sent_json:
                 yield f"data: {current_state_json}\n\n"
                 last_state_sent_json = current_state_json
-            else: # Send a minimal keep-alive ping if state hasn't changed
-                  # This also helps detect if client disconnected and SSE needs to restart on client
+            else: 
                 yield ": KEEPALIVE\n\n"
-
-
-            time.sleep(0.75) # Frequency of updates
+            time.sleep(0.75)
     return Response(stream_with_context(generate_status_updates()), mimetype='text/event-stream')
 
 if __name__ == '__main__':
-    reset_migration_state() # Initialize state on app start
+    reset_migration_state() 
     add_log_to_state("Application server started and ready.", "info")
     app.run(debug=os.getenv("FLASK_DEBUG", "False").lower() == "true", host='0.0.0.0', port=5000, threaded=True)

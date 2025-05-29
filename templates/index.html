@@ -119,7 +119,6 @@
     </div>
 
     <script>
-        // --- S3MigrationDashboard Class (from previous response, with minor adjustments) ---
         class S3MigrationDashboard {
             constructor() {
                 this.startButton = document.getElementById('startButton');
@@ -141,6 +140,7 @@
                 this.particleInterval = null;
                 this.eventSource = null;
                 this.isMigrationGloballyRunning = false;
+                this.lastReceivedStatus = {}; // Store last full status for button logic
 
                 this.init();
             }
@@ -151,13 +151,13 @@
                 this.connectToStatusStream();
             }
             
-            formatBytes(bytes, decimals = 1) { // Default to 1 decimal for cleaner UI
+            formatBytes(bytes, decimals = 1) {
                 if (bytes === undefined || bytes === null || isNaN(bytes) || bytes === 0) return '0 Bytes';
                 const k = 1024;
                 const dm = decimals < 0 ? 0 : decimals;
                 const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
                 let i = Math.floor(Math.log(bytes) / Math.log(k));
-                i = Math.min(i, sizes.length - 1); // Cap at TB for sanity if very large
+                i = Math.min(i, sizes.length - 1);
                 return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
             }
 
@@ -177,13 +177,18 @@
                     this.eventSource.close();
                 }
                 this.eventSource = new EventSource("{{ url_for('migration_status_stream') }}");
-                this.addLog('Attempting to connect to migration status stream...', 'info');
+                // this.addLog('Attempting to connect to migration status stream...', 'info'); // Already logged in init
 
                 this.eventSource.onopen = () => {
                     this.addLog('Successfully connected to status stream.', 'success');
                 };
 
                 this.eventSource.onmessage = (event) => {
+                    // Skip keep-alive messages
+                    if (event.data === ": KEEPALIVE") { // Check if backend sends this exact string for keep-alive
+                        // console.log("Keep-alive received");
+                        return;
+                    }
                     try {
                         const status = JSON.parse(event.data);
                         this.updateUIFromStatus(status);
@@ -195,31 +200,29 @@
 
                 this.eventSource.onerror = (err) => {
                     console.error("Status EventSource failed:", err);
-                    this.addLog('Connection to server status stream lost. Will attempt to reconnect.', 'error');
-                    this.isMigrationGloballyRunning = false; // Assume not running if connection lost
-                    this.updateButtonState(); // Update button to reflect lost connection
-                    this.stopParticleAnimation(); // Stop particles
-                    // Reconnect after a delay
+                    this.addLog('Connection to server status stream lost. Reconnecting in 5s...', 'error');
+                    this.isMigrationGloballyRunning = false; 
+                    this.updateButtonState(); 
+                    this.stopParticleAnimation(); 
+                    if (this.eventSource) this.eventSource.close(); // Ensure old one is closed
                     setTimeout(() => this.connectToStatusStream(), 5000);
                 };
             }
             
             updateButtonState() {
                 if (this.isMigrationGloballyRunning) {
-                    this.buttonText.textContent = '⏳ Migration in Progress...';
+                    this.buttonText.innerHTML = '<span class="loading-spinner"></span>Migration in Progress...';
                     this.startButton.disabled = true;
                     this.startButton.classList.add('pulse');
                 } else {
                     this.startButton.classList.remove('pulse');
                     this.startButton.disabled = false;
-                    // Check last known completion status to set button text appropriately
-                    const lastStatus = this.lastReceivedStatus || {}; // Store last status if needed
-                    if (lastStatus.completion_status === 'completed_fully') {
+                    if (this.lastReceivedStatus.completion_status === 'completed_fully') {
                         this.buttonText.textContent = '✅ Migration Complete';
                         this.startButton.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)';
-                    } else if (lastStatus.completion_status === 'completed_partial' || lastStatus.completion_status === 'failed') {
+                    } else if (this.lastReceivedStatus.completion_status === 'completed_partial' || this.lastReceivedStatus.completion_status === 'failed') {
                         this.buttonText.textContent = '⚠️ Issues Encountered (Retry?)';
-                        this.startButton.style.background = 'linear-gradient(135deg, #e67e22, #d35400)'; // Orange/Red for retry
+                        this.startButton.style.background = 'linear-gradient(135deg, #e67e22, #d35400)';
                     } else { 
                         this.buttonText.textContent = '🚀 Start Migration';
                         this.startButton.style.background = ''; 
@@ -227,9 +230,8 @@
                 }
             }
 
-
             updateUIFromStatus(status) {
-                this.lastReceivedStatus = status; // Store for button state logic
+                this.lastReceivedStatus = status;
                 this.isMigrationGloballyRunning = status.is_running || false;
                 this.updateButtonState();
 
@@ -246,7 +248,7 @@
 
                 const progress = status.progress_percentage_files || 0;
                 this.progressBar.style.width = progress + '%';
-                this.progressBar.textContent = Math.round(progress) + '%'; // Show text in bar
+                this.progressBar.textContent = Math.round(progress) + '%';
                 this.progressPercent.textContent = Math.round(progress) + '%';
 
                 if (status.current_file_name && status.is_running && !status.completion_status) {
@@ -256,23 +258,15 @@
                     this.currentFileSection.style.display = 'none';
                 }
 
-                // Efficiently update logs: only add new ones
                 if (status.log_messages && Array.isArray(status.log_messages)) {
-                    // A more robust way would be for the server to send only new logs or use log IDs
-                    // For now, if the log list from server is different, re-render.
-                    // This is a simple approach; could be optimized.
-                    const serverLogCount = status.log_messages.length;
-                    const clientLogCount = this.logContainer.children.length;
-                    
-                    // If server sends full log history, clear and append
-                    if (serverLogCount > 0) { //  && serverLogCount !== clientLogCount - (this.logContainer.firstChild && this.logContainer.firstChild.textContent.includes("Dashboard initialized") ? 1:0)) {
-                        // Heuristic to check if we should refresh logs (e.g. new logs added)
-                        // This isn't perfect, for true delta updates, server needs to send only new logs.
-                         this.logContainer.innerHTML = ''; // Clear existing logs from client
-                         status.log_messages.forEach(log => {
-                             this.addLog(log.text, log.type, false); // false to skip timestamping again
-                         });
-                    }
+                    this.logContainer.innerHTML = ''; // Clear and repopulate for simplicity
+                    status.log_messages.forEach(log => {
+                         this.addLog(log.text, log.type, false); 
+                     });
+                }
+                // Ensure initial "Ready" message if applicable and logs are empty
+                if (!status.is_running && !status.completion_status && this.logContainer.children.length === 0) {
+                     this.addLog('System ready. Click "Start Migration" to begin.', 'info');
                 }
             }
 
@@ -283,13 +277,11 @@
                 }
                 
                 this.startButton.disabled = true;
-                this.buttonText.innerHTML = '<span class="loading-spinner"></span>Initializing...'; // Use innerHTML for spinner
-                this.addLog('🚀 Sending request to start S3 data migration...', 'info');
-                this.logContainer.innerHTML = ''; // Clear logs for new migration
+                this.buttonText.innerHTML = '<span class="loading-spinner"></span>Initializing...';
+                this.logContainer.innerHTML = ''; // Clear logs for new migration run
                 this.addLog('🚀 Sending request to start S3 data migration...', 'info');
 
-
-                fetch("{{ url_for('trigger_migration') }}", { method: 'POST' })
+                fetch("{{ url_for('trigger_migration_route') }}", { method: 'POST' }) // CORRECTED ENDPOINT
                     .then(response => {
                         if (!response.ok) {
                             return response.json().then(err => { throw new Error(err.message || `Server error: ${response.status}`) });
@@ -299,11 +291,10 @@
                     .then(data => {
                         if (data.status === 'error') {
                             this.addLog(`Error starting migration: ${data.message}`, 'error');
-                            this.isMigrationGloballyRunning = false; // Ensure it's marked not running
+                            this.isMigrationGloballyRunning = false;
                             this.updateButtonState();
                         } else {
                             this.addLog(data.message, 'success');
-                            // UI will update via the status stream shortly
                         }
                     })
                     .catch(error => {
@@ -332,12 +323,15 @@
             stopParticleAnimation() {
                 clearInterval(this.particleInterval);
                 this.particleInterval = null;
-                this.transferViz.querySelectorAll('.data-particle').forEach(p => p.remove());
+                if (this.transferViz) { // Check if transferViz exists
+                    this.transferViz.querySelectorAll('.data-particle').forEach(p => p.remove());
+                }
             }
             
             addLog(message, type = 'info', prependTimestamp = true) {
                 const logEntry = document.createElement('div');
                 logEntry.className = `log-entry ${type}`;
+                // Server now sends timestamped logs in the snapshot, so don't prepend here if false
                 logEntry.textContent = prependTimestamp ? `[${new Date().toLocaleTimeString()}] ${message}` : message;
                 
                 this.logContainer.appendChild(logEntry);
@@ -350,7 +344,7 @@
         }
 
         document.addEventListener('DOMContentLoaded', () => {
-            window.s3Dashboard = new S3MigrationDashboard(); // Make it globally accessible for debugging if needed
+            window.s3Dashboard = new S3MigrationDashboard();
         });
     </script>
 </body>
