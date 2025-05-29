@@ -9,215 +9,348 @@
 <body>
     <div class="dashboard">
         <div class="header">
-            <h1>🚀 S3 Data Migration Dashboard</h1>
-            <p>Real-time data transfer monitoring and analytics</p>
+            <h1>🚀 S3 Data Migration</h1>
+            <p>High-speed cloud data transfer with real-time monitoring</p>
         </div>
 
-        <div class="main-content">
-            <div class="config-section">
-                <div class="config-card">
-                    <h3>📤 Source Configuration</h3>
-                    <div class="detail"><span class="label">Account:</span> <span id="source-account">{{ source_account_id if source_account_id else 'N/A' }}</span></div>
-                    <div class="detail"><span class="label">Region:</span> <span id="source-region">{{ env_vars.SOURCE_S3_REGION }}</span></div>
-                    <div class="detail"><span class="label">Bucket:</span> <span id="source-bucket">{{ env_vars.SOURCE_S3_BUCKET }}</span></div>
-                    <div class="detail"><span class="label">Prefix:</span> <span id="source-prefix">{{ env_vars.SOURCE_S3_PREFIX }}</span></div>
+        <div class="main-grid">
+            <div class="card source-card">
+                <div class="card-header">
+                    <div class="card-icon">📤</div>
+                    <div class="card-title">Source Configuration</div>
                 </div>
-
-                <div class="config-card" style="background: linear-gradient(135deg, #11998e, #38ef7d);">
-                    <h3>📥 Destination Configuration</h3>
-                    <div class="detail"><span class="label">Account:</span> <span id="dest-account">{{ dest_account_id if dest_account_id else 'N/A' }}</span></div>
-                    <div class="detail"><span class="label">Region:</span> <span id="dest-region">{{ env_vars.DEST_S3_REGION }}</span></div>
-                    <div class="detail"><span class="label">Bucket:</span> <span id="dest-bucket">{{ env_vars.DEST_S3_BUCKET }}</span></div>
-                    <div class="detail"><span class="label">Prefix:</span> <span id="dest-prefix">{{ env_vars.DEST_S3_PREFIX }}</span></div>
+                <div class="config-item">
+                    <span class="config-label">Account ID:</span>
+                    <span class="config-value" id="sourceAccountDisplay">{{ source_account_id if source_account_id else 'N/A (Role?)' }}</span>
+                </div>
+                <div class="config-item">
+                    <span class="config-label">Region:</span>
+                    <span class="config-value" id="sourceRegionDisplay">{{ env_vars.SOURCE_S3_REGION }}</span>
+                </div>
+                <div class="config-item">
+                    <span class="config-label">Bucket:</span>
+                    <span class="config-value" id="sourceBucketDisplay">{{ env_vars.SOURCE_S3_BUCKET }}</span>
+                </div>
+                <div class="config-item">
+                    <span class="config-label">Prefix:</span>
+                    <span class="config-value" id="sourcePrefixDisplay">{{ env_vars.SOURCE_S3_PREFIX }}</span>
                 </div>
             </div>
 
+            <div class="card destination-card">
+                <div class="card-header">
+                    <div class="card-icon">📥</div>
+                    <div class="card-title">Destination Configuration</div>
+                </div>
+                <div class="config-item">
+                    <span class="config-label">Account ID:</span>
+                    <span class="config-value" id="destAccountDisplay">{{ dest_account_id if dest_account_id else 'N/A (Role?)' }}</span>
+                </div>
+                <div class="config-item">
+                    <span class="config-label">Region:</span>
+                    <span class="config-value" id="destRegionDisplay">{{ env_vars.DEST_S3_REGION }}</span>
+                </div>
+                <div class="config-item">
+                    <span class="config-label">Bucket:</span>
+                    <span class="config-value" id="destBucketDisplay">{{ env_vars.DEST_S3_BUCKET }}</span>
+                </div>
+                <div class="config-item">
+                    <span class="config-label">Prefix:</span>
+                    <span class="config-value" id="destPrefixDisplay">{{ env_vars.DEST_S3_PREFIX }}</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="transfer-section">
             <div class="control-panel">
-                <button id="startMigrationButton" class="start-button">
-                    Start Migration
+                <button class="start-button" id="startButton">
+                    <span id="buttonText">🚀 Start Migration</span>
                 </button>
             </div>
 
-            <div id="progressSection" class="progress-section">
-                <div class="progress-container">
-                    <div class="progress-header">
-                        <h3>📊 Migration Progress</h3>
-                        <span id="progressPercentageDisplay">0%</span>
-                    </div>
-                    <div class="progress-bar-wrapper">
-                        <div id="mainProgressBar" class="progress-bar">0%</div>
-                    </div>
-                    <div class="eta-display">
-                        <div>⏱️ Estimated Time Remaining</div>
-                        <div class="eta-value" id="etaValueDisplay">Calculating...</div>
-                    </div>
-                </div>
+            <div class="transfer-visualization" id="transferViz">
+                <div class="endpoint source-endpoint">S</div>
+                <div class="transfer-path"></div>
+                <div class="endpoint destination-endpoint">D</div>
+                <!-- Particles will be added here by JS -->
+            </div>
 
-                <div id="currentFileInfoDisplay" class="current-file" style="display: none;">
-                    <div class="file-name" id="currentFileNameDisplay">No file currently transferring</div>
-                    <div class="file-size" id="currentFileSizeDisplay">0 MB</div>
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalFilesStat">0</div>
+                    <div class="stat-label">Total Files</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="transferredFilesStat">0</div>
+                    <div class="stat-label">Transferred</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="totalSizeStat">0 GB</div>
+                    <div class="stat-label">Total Size</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="transferSpeedStat">0 MB/s</div>
+                    <div class="stat-label">Speed</div>
+                </div>
+            </div>
 
-                <div class="messages-container">
-                    <div id="messagesLogArea">
-                        <div class="message info">Ready to start migration. Click the button above to begin.</div>
-                    </div>
+            <div class="progress-section">
+                <div class="progress-header">
+                    <div class="progress-title">Migration Progress</div>
+                    <div class="progress-percentage" id="progressPercentDisplay">0%</div>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" id="mainProgressBar" style="width: 0%">0%</div>
+                </div>
+            </div>
+
+            <div class="current-file" id="currentFileSection" style="display: none;">
+                <div class="current-file-label">Currently Processing:</div>
+                <div class="current-file-name" id="currentFileNameDisplay"></div>
+            </div>
+
+            <div class="log-section">
+                <div class="log-header">📊 Migration Logs</div>
+                <div id="logContainer">
+                    <!-- Logs will be populated by JavaScript -->
                 </div>
             </div>
         </div>
     </div>
 
     <script>
-        const startButton = document.getElementById('startMigrationButton');
-        const progressSection = document.getElementById('progressSection');
-        const progressBarElement = document.getElementById('mainProgressBar');
-        const progressPercentageElement = document.getElementById('progressPercentageDisplay');
-        const etaValueDisplayElement = document.getElementById('etaValueDisplay');
-        const currentFileInfoElement = document.getElementById('currentFileInfoDisplay');
-        const currentFileNameElement = document.getElementById('currentFileNameDisplay');
-        const currentFileSizeElement = document.getElementById('currentFileSizeDisplay');
-        const messagesLogContainer = document.getElementById('messagesLogArea');
+        // --- S3MigrationDashboard Class (from previous response, with minor adjustments) ---
+        class S3MigrationDashboard {
+            constructor() {
+                this.startButton = document.getElementById('startButton');
+                this.buttonText = document.getElementById('buttonText');
+                this.progressBar = document.getElementById('mainProgressBar');
+                this.progressPercent = document.getElementById('progressPercentDisplay');
+                this.logContainer = document.getElementById('logContainer');
+                this.transferViz = document.getElementById('transferViz');
+                this.currentFileSection = document.getElementById('currentFileSection');
+                this.currentFileName = document.getElementById('currentFileNameDisplay');
+                
+                this.stats = {
+                    totalFiles: document.getElementById('totalFilesStat'),
+                    transferredFiles: document.getElementById('transferredFilesStat'),
+                    totalSize: document.getElementById('totalSizeStat'),
+                    transferSpeed: document.getElementById('transferSpeedStat')
+                };
 
-        let totalFilesToProcess = 0;
-        let totalBytesToProcess = 0;
-        let migrationStartTime;
-        let eventSource;
+                this.particleInterval = null;
+                this.eventSource = null;
+                this.isMigrationGloballyRunning = false;
 
-        function formatBytes(bytes, decimals = 2) {
-            if (bytes === undefined || bytes === null || isNaN(bytes) || bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const dm = decimals < 0 ? 0 : decimals;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            if (i >= sizes.length) return parseFloat((bytes / Math.pow(k, sizes.length - 1)).toFixed(dm)) + ' ' + sizes[sizes.length -1];
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
-        }
-
-        function formatEta(seconds) {
-            if (seconds === undefined || seconds === null || !isFinite(seconds) || seconds < 0) return 'Calculating...';
-            if (progressBarElement.style.width === '100%') return 'Completed!'; // Check before almost done
-            if (seconds === 0) return 'Almost done!';
-            const h = Math.floor(seconds / 3600);
-            const m = Math.floor((seconds % 3600) / 60);
-            const s = Math.floor(seconds % 60);
-            let etaString = '';
-            if (h > 0) etaString += `${h}h `;
-            if (m > 0) etaString += `${m}m `;
-            etaString += `${s}s`;
-            return etaString.trim() || '0s';
-        }
-
-        function addMessage(message, type = 'info') {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${type}`;
-            messageDiv.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-            messagesLogContainer.appendChild(messageDiv);
-            messagesLogContainer.scrollTop = messagesLogContainer.scrollHeight;
-            if (messagesLogContainer.children.length > 150) {
-                messagesLogContainer.removeChild(messagesLogContainer.firstChild);
+                this.init();
             }
-        }
 
-        function resetUIForNewRun() {
-            startButton.innerHTML = 'Start Migration';
-            startButton.disabled = false;
-            progressBarElement.style.width = '0%';
-            progressBarElement.textContent = '0%';
-            progressBarElement.style.background = '';
-            progressPercentageElement.textContent = '0%';
-            etaValueDisplayElement.textContent = 'Calculating...';
-            currentFileInfoElement.style.display = 'none';
-            currentFileNameElement.textContent = 'No file currently transferring';
-            currentFileSizeElement.textContent = '';
-            messagesLogContainer.innerHTML = '<div class="message info">Ready to start migration. Click the button above to begin.</div>';
-        }
+            init() {
+                this.startButton.addEventListener('click', () => this.triggerMigration());
+                this.addLog('Dashboard initialized. Connecting to status stream...', 'info');
+                this.connectToStatusStream();
+            }
+            
+            formatBytes(bytes, decimals = 1) { // Default to 1 decimal for cleaner UI
+                if (bytes === undefined || bytes === null || isNaN(bytes) || bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const dm = decimals < 0 ? 0 : decimals;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+                let i = Math.floor(Math.log(bytes) / Math.log(k));
+                i = Math.min(i, sizes.length - 1); // Cap at TB for sanity if very large
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+            }
 
-        function handleServerEvent(event) {
-            const data = JSON.parse(event.data);
+            formatSpeed(bytesPerSecond, decimals = 1) {
+                if (!isFinite(bytesPerSecond) || bytesPerSecond === 0) return '0 MB/s';
+                const megabytesPerSecond = bytesPerSecond / (1024 * 1024);
+                return megabytesPerSecond.toFixed(decimals) + ' MB/s';
+            }
 
-            if (data.event_type === "log") {
-                addMessage(data.message_text, data.message_type || 'info');
-            } else if (data.event_type === "error") {
-                 addMessage(data.error_message, 'error');
-                if (data.critical || data.status === 'failed') {
-                    progressBarElement.style.background = '#dc3545';
-                    if(eventSource) eventSource.close();
-                    startButton.innerHTML = 'Migration Failed ❌';
-                    startButton.disabled = true;
+            formatNumber(num) {
+                if (num === undefined || num === null || isNaN(num)) return '0';
+                return num.toLocaleString();
+            }
+
+            connectToStatusStream() {
+                if (this.eventSource) {
+                    this.eventSource.close();
                 }
-                return;
+                this.eventSource = new EventSource("{{ url_for('migration_status_stream') }}");
+                this.addLog('Attempting to connect to migration status stream...', 'info');
+
+                this.eventSource.onopen = () => {
+                    this.addLog('Successfully connected to status stream.', 'success');
+                };
+
+                this.eventSource.onmessage = (event) => {
+                    try {
+                        const status = JSON.parse(event.data);
+                        this.updateUIFromStatus(status);
+                    } catch (e) {
+                        console.error("Error parsing status JSON:", e, "Data:", event.data);
+                        this.addLog('Received malformed status update from server.', 'error');
+                    }
+                };
+
+                this.eventSource.onerror = (err) => {
+                    console.error("Status EventSource failed:", err);
+                    this.addLog('Connection to server status stream lost. Will attempt to reconnect.', 'error');
+                    this.isMigrationGloballyRunning = false; // Assume not running if connection lost
+                    this.updateButtonState(); // Update button to reflect lost connection
+                    this.stopParticleAnimation(); // Stop particles
+                    // Reconnect after a delay
+                    setTimeout(() => this.connectToStatusStream(), 5000);
+                };
+            }
+            
+            updateButtonState() {
+                if (this.isMigrationGloballyRunning) {
+                    this.buttonText.textContent = '⏳ Migration in Progress...';
+                    this.startButton.disabled = true;
+                    this.startButton.classList.add('pulse');
+                } else {
+                    this.startButton.classList.remove('pulse');
+                    this.startButton.disabled = false;
+                    // Check last known completion status to set button text appropriately
+                    const lastStatus = this.lastReceivedStatus || {}; // Store last status if needed
+                    if (lastStatus.completion_status === 'completed_fully') {
+                        this.buttonText.textContent = '✅ Migration Complete';
+                        this.startButton.style.background = 'linear-gradient(135deg, #2ecc71, #27ae60)';
+                    } else if (lastStatus.completion_status === 'completed_partial' || lastStatus.completion_status === 'failed') {
+                        this.buttonText.textContent = '⚠️ Issues Encountered (Retry?)';
+                        this.startButton.style.background = 'linear-gradient(135deg, #e67e22, #d35400)'; // Orange/Red for retry
+                    } else { 
+                        this.buttonText.textContent = '🚀 Start Migration';
+                        this.startButton.style.background = ''; 
+                    }
+                }
             }
 
-            switch (data.event_type) {
-                case "initial_stats":
-                    migrationStartTime = Date.now();
-                    totalFilesToProcess = data.total_files;
-                    totalBytesToProcess = data.total_size_bytes;
-                    addMessage(data.message || `Found ${totalFilesToProcess} files, total size ${formatBytes(totalBytesToProcess)}.`, 'info');
-                    if (progressBarElement.style.width === '0%') {
-                         etaValueDisplayElement.textContent = totalFilesToProcess > 0 ? 'Calculating...' : 'No files';
+
+            updateUIFromStatus(status) {
+                this.lastReceivedStatus = status; // Store for button state logic
+                this.isMigrationGloballyRunning = status.is_running || false;
+                this.updateButtonState();
+
+                if (status.is_running && !this.particleInterval) {
+                    this.startParticleAnimation();
+                } else if (!status.is_running && this.particleInterval) {
+                    this.stopParticleAnimation();
+                }
+                
+                this.stats.totalFiles.textContent = this.formatNumber(status.total_files);
+                this.stats.transferredFiles.textContent = this.formatNumber(status.files_processed_count);
+                this.stats.totalSize.textContent = this.formatBytes(status.total_size_bytes);
+                this.stats.transferSpeed.textContent = this.formatSpeed(status.transfer_speed_bps);
+
+                const progress = status.progress_percentage_files || 0;
+                this.progressBar.style.width = progress + '%';
+                this.progressBar.textContent = Math.round(progress) + '%'; // Show text in bar
+                this.progressPercent.textContent = Math.round(progress) + '%';
+
+                if (status.current_file_name && status.is_running && !status.completion_status) {
+                    this.currentFileSection.style.display = 'block';
+                    this.currentFileName.textContent = `${status.current_file_name} (${this.formatBytes(status.current_file_size_bytes || 0)})`;
+                } else {
+                    this.currentFileSection.style.display = 'none';
+                }
+
+                // Efficiently update logs: only add new ones
+                if (status.log_messages && Array.isArray(status.log_messages)) {
+                    // A more robust way would be for the server to send only new logs or use log IDs
+                    // For now, if the log list from server is different, re-render.
+                    // This is a simple approach; could be optimized.
+                    const serverLogCount = status.log_messages.length;
+                    const clientLogCount = this.logContainer.children.length;
+                    
+                    // If server sends full log history, clear and append
+                    if (serverLogCount > 0) { //  && serverLogCount !== clientLogCount - (this.logContainer.firstChild && this.logContainer.firstChild.textContent.includes("Dashboard initialized") ? 1:0)) {
+                        // Heuristic to check if we should refresh logs (e.g. new logs added)
+                        // This isn't perfect, for true delta updates, server needs to send only new logs.
+                         this.logContainer.innerHTML = ''; // Clear existing logs from client
+                         status.log_messages.forEach(log => {
+                             this.addLog(log.text, log.type, false); // false to skip timestamping again
+                         });
                     }
-                    break;
-                case "file_start":
-                    currentFileInfoElement.style.display = 'block';
-                    currentFileNameElement.innerHTML = `📁 ${data.file_name}`; 
-                    currentFileSizeElement.textContent = `Size: ${formatBytes(data.file_size_bytes)}`;
-                    break;
-                case "file_result":
-                    const currentProgress = data.progress_percentage_files || 0;
-                    progressBarElement.style.width = currentProgress + '%';
-                    progressBarElement.textContent = Math.round(currentProgress) + '%';
-                    progressPercentageElement.textContent = Math.round(currentProgress) + '%';
-                    etaValueDisplayElement.textContent = formatEta(data.eta_seconds);
-                    if (data.status === "success") {
-                         addMessage(`Copied: ${data.file_name}`, 'success');
-                    } else {
-                        addMessage(`Failed: ${data.file_name}. Error: ${data.error_message}`, 'error');
+                }
+            }
+
+            triggerMigration() {
+                if (this.isMigrationGloballyRunning) {
+                    this.addLog('A migration is already in progress. Please wait.', 'warning');
+                    return;
+                }
+                
+                this.startButton.disabled = true;
+                this.buttonText.innerHTML = '<span class="loading-spinner"></span>Initializing...'; // Use innerHTML for spinner
+                this.addLog('🚀 Sending request to start S3 data migration...', 'info');
+                this.logContainer.innerHTML = ''; // Clear logs for new migration
+                this.addLog('🚀 Sending request to start S3 data migration...', 'info');
+
+
+                fetch("{{ url_for('trigger_migration') }}", { method: 'POST' })
+                    .then(response => {
+                        if (!response.ok) {
+                            return response.json().then(err => { throw new Error(err.message || `Server error: ${response.status}`) });
+                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        if (data.status === 'error') {
+                            this.addLog(`Error starting migration: ${data.message}`, 'error');
+                            this.isMigrationGloballyRunning = false; // Ensure it's marked not running
+                            this.updateButtonState();
+                        } else {
+                            this.addLog(data.message, 'success');
+                            // UI will update via the status stream shortly
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error triggering migration:', error);
+                        this.addLog(`Failed to send start migration request: ${error.message}`, 'error');
+                        this.isMigrationGloballyRunning = false;
+                        this.updateButtonState();
+                    });
+            }
+
+            startParticleAnimation() {
+                if (this.particleInterval) return; 
+                this.particleInterval = setInterval(() => {
+                    if (!this.isMigrationGloballyRunning) {
+                        this.stopParticleAnimation();
+                        return;
                     }
-                    break;
-                case "migration_complete":
-                    addMessage(data.final_message, data.status === "completed_fully" ? 'success' : 'warning');
-                    progressBarElement.style.width = '100%';
-                    progressBarElement.textContent = '100%';
-                    progressPercentageElement.textContent = '100%';
-                    if (data.status === "completed_fully") {
-                        progressBarElement.style.background = '';
-                        startButton.innerHTML = 'Migration Complete ✅';
-                    } else {
-                         progressBarElement.style.background = '#ffc107';
-                         startButton.innerHTML = 'Partially Complete ⚠️';
-                    }
-                    etaValueDisplayElement.textContent = `Done in ${formatEta(data.total_time_seconds)}.`;
-                    currentFileInfoElement.style.display = 'none';
-                    if(eventSource) eventSource.close();
-                    startButton.disabled = false;
-                    break;
+                    const particle = document.createElement('div');
+                    particle.className = 'data-particle';
+                    particle.style.animationDelay = (Math.random() * 0.5).toFixed(2) + 's'; 
+                    this.transferViz.appendChild(particle);
+                    setTimeout(() => particle.remove(), 2500); 
+                }, 250); 
+            }
+
+            stopParticleAnimation() {
+                clearInterval(this.particleInterval);
+                this.particleInterval = null;
+                this.transferViz.querySelectorAll('.data-particle').forEach(p => p.remove());
+            }
+            
+            addLog(message, type = 'info', prependTimestamp = true) {
+                const logEntry = document.createElement('div');
+                logEntry.className = `log-entry ${type}`;
+                logEntry.textContent = prependTimestamp ? `[${new Date().toLocaleTimeString()}] ${message}` : message;
+                
+                this.logContainer.appendChild(logEntry);
+                this.logContainer.scrollTop = this.logContainer.scrollHeight; 
+                
+                while (this.logContainer.children.length > 100) {
+                     this.logContainer.removeChild(this.logContainer.firstChild);
+                }
             }
         }
-
-        startButton.addEventListener('click', () => {
-            startButton.innerHTML = '<span class="loading-spinner"></span>Initializing...';
-            startButton.disabled = true;
-            progressSection.style.display = 'block';
-            resetUIForNewRun(); 
-            addMessage('Initializing migration process...', 'info');
-            if(eventSource) {
-                eventSource.close();
-            }
-            eventSource = new EventSource("{{ url_for('start_migration') }}");
-            eventSource.onmessage = handleServerEvent;
-            eventSource.onerror = function(err) {
-                console.error("EventSource failed:", err);
-                addMessage('Connection to server lost or migration stream error. Check console and server logs.', 'error');
-                progressBarElement.style.background = '#dc3545';
-                if(eventSource) eventSource.close();
-                startButton.innerHTML = 'Start Migration';
-                startButton.disabled = false;
-            };
-        });
 
         document.addEventListener('DOMContentLoaded', () => {
-            progressSection.style.display = 'none'; 
+            window.s3Dashboard = new S3MigrationDashboard(); // Make it globally accessible for debugging if needed
         });
     </script>
 </body>
