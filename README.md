@@ -98,7 +98,7 @@ A Flask-based web application to migrate specific data from an AWS S3 bucket in 
 
     The principal performing the migration (e.g., an IAM user whose keys are in `.env`, or an EC2 instance role) needs permissions in both the source and destination accounts.
 
-    **a. Destination Account IAM Policy (Account: `3407-5282-6549`)**
+    **a. Destination Account IAM Policy (Account: `1234-5678-9000`)**
 
     This policy should be attached to the IAM user (`s3` in your case) or IAM Role (if running on EC2) in the **Destination Account** that will be executing the migration script.
 
@@ -161,7 +161,7 @@ A Flask-based web application to migrate specific data from an AWS S3 bucket in 
     ```
     *This policy allows the IAM user/role to read the specified prefix from the source bucket (`s3migrationtask/msi/*`) and write to the specified prefix in its own destination bucket (`aidattu/mig/*`).*
 
-    **b. Source S3 Bucket Policy (Bucket: `s3migrationtask` in Account: `9054-1825-7358`)**
+    **b. Source S3 Bucket Policy (Bucket: `s3migrationtask` in Account: `1234-5678-9000`)**
 
     This policy must be applied to the **Source S3 Bucket** (`s3migrationtask`) in the **Source Account**.
 
