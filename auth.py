@@ -4,10 +4,10 @@ import pyotp
 import qrcode
 import io
 import base64
-from flask import Blueprint, render_template, redirect, url_for, flash, request
+from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from app import db, USERS_COLLECTION_NAME  # Import the explicit 'db' object
+from app import USERS_COLLECTION_NAME # Importing variables is fine
 from models import User
 
 auth_bp = Blueprint('auth', __name__)
@@ -25,7 +25,7 @@ def register():
             flash('Username and password are required.', 'danger')
             return redirect(url_for('auth.register'))
 
-        user_exists = db[USERS_COLLECTION_NAME].find_one({'username': username})
+        user_exists = current_app.db[USERS_COLLECTION_NAME].find_one({'username': username})
         if user_exists:
             flash('Username already exists. Please choose another.', 'danger')
             return redirect(url_for('auth.register'))
@@ -33,7 +33,7 @@ def register():
         hashed_password = generate_password_hash(password)
         otp_secret = pyotp.random_base32()
         
-        new_user_id = db[USERS_COLLECTION_NAME].insert_one({
+        new_user_id = current_app.db[USERS_COLLECTION_NAME].insert_one({
             'username': username,
             'password': hashed_password,
             'otp_secret': otp_secret
@@ -41,14 +41,13 @@ def register():
         
         flash('Registration successful! Please scan the QR code to set up 2-Factor Authentication.', 'success')
         
-        user_data = db[USERS_COLLECTION_NAME].find_one({'_id': new_user_id})
+        user_data = current_app.db[USERS_COLLECTION_NAME].find_one({'_id': new_user_id})
         user_object = User(user_data)
         login_user(user_object)
         
         return redirect(url_for('auth.two_factor_setup'))
     
     return render_template('register.html')
-
 
 @auth_bp.route('/login', methods=['GET', 'POST'])
 def login():
@@ -60,7 +59,7 @@ def login():
         password = request.form.get('password')
         otp_token = request.form.get('otp')
         
-        user_data = db[USERS_COLLECTION_NAME].find_one({'username': username})
+        user_data = current_app.db[USERS_COLLECTION_NAME].find_one({'username': username})
         
         if not user_data or not check_password_hash(user_data.get('password'), password):
             flash('Invalid username or password. Please try again.', 'danger')
@@ -81,7 +80,7 @@ def login():
 @login_required
 def two_factor_setup():
     if not current_user.otp_secret:
-        flash('2FA secret not found for your account. Please contact support.', 'danger')
+        flash('2FA secret not found for your account.', 'danger')
         return redirect(url_for('index'))
 
     provisioning_uri = pyotp.totp.TOTP(current_user.otp_secret).provisioning_uri(
