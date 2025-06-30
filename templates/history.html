@@ -1,5 +1,4 @@
 {% extends "base.html" %}
-
 {% block title %}Migration History{% endblock %}
 
 {% block content %}
@@ -10,7 +9,7 @@
         <thead>
             <tr>
                 <th>Start Time</th>
-                <th>End Time</th>
+                <th>Initiated By</th>
                 <th>Status</th>
                 <th>Source</th>
                 <th>Destination</th>
@@ -20,9 +19,8 @@
         <tbody>
             {% for migration in migrations %}
             <tr>
-                {# Use the new '_dt' suffixed fields for formatting #}
-                <td>{{ migration.start_time_dt.strftime('%Y-%m-%d %H:%M:%S') if migration.start_time_dt else 'N/A' }}</td>
-                <td>{{ migration.end_time_dt.strftime('%Y-%m-%d %H:%M:%S') if migration.end_time_dt else 'In Progress / N/A' }}</td>
+                <td>{{ migration.get('start_time_dt') and migration.start_time_dt.strftime('%Y-%m-%d %H:%M:%S') or 'N/A' }}</td>
+                <td>{{ migration.get('username', 'N/A') }}</td>
                 <td>
                     {% if migration.status %}
                         <span class="status-badge {{ migration.status }}">{{ migration.status.replace('_', ' ')|title }}</span>
@@ -30,16 +28,11 @@
                         <span class="status-badge unknown">Unknown</span>
                     {% endif %}
                 </td>
+                <td>{{ migration.get('config', {}).get('source_bucket', 'N/A') }}/{{ migration.get('config', {}).get('source_prefix', '') }}</td>
+                <td>{{ migration.get('config', {}).get('dest_bucket', 'N/A') }}/{{ migration.get('config', {}).get('dest_prefix', '') }}</td>
                 <td>
-                    {# Use .get() for safer access to nested dictionary keys #}
-                    {{ migration.get('config', {}).get('source_bucket', 'N/A') }}/{{ migration.get('config', {}).get('source_prefix', '') }}
-                </td>
-                <td>
-                    {{ migration.get('config', {}).get('dest_bucket', 'N/A') }}/{{ migration.get('config', {}).get('dest_prefix', '') }}
-                </td>
-                <td>
-                    Files Scanned: {{ migration.get('files_scanned', 0)|int }}<br>
-                    Files to Copy: {{ migration.get('total_files', 0)|int }}<br>
+                    Scanned: {{ migration.get('files_scanned', 0)|int }}<br>
+                    To Copy: {{ migration.get('total_files', 0)|int }}<br>
                     Completed: {{ migration.get('files_completed', 0)|int }}<br>
                     Failed: {{ migration.get('files_failed', 0)|int }}
                 </td>

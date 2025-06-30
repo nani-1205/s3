@@ -3,12 +3,12 @@
 import threading
 import time
 import json
-from datetime import datetime # <--- IMPORTED DATETIME
 from flask import Blueprint, render_template, jsonify, request, Response, stream_with_context, current_app
 from flask_login import login_required, current_user
 from bson.objectid import ObjectId
 import boto3
 import botocore
+from crypto import decrypt_data # Import our crypto helper
 
 migration_bp = Blueprint('migration', __name__)
 
@@ -18,11 +18,12 @@ def get_live_migration_state():
     state = current_app.db[MIGRATION_STATE_COLLECTION_NAME].find_one({'_id': 'live_migration_status'})
     return state if state else {'is_running': False}
 
-# --- Core Migration Task (with Checkpointing) ---
+# --- Core Migration Task (with Checkpointing and Credential Decryption) ---
 def do_migration_with_checkpointing(app_context, migration_id_str, config):
     with app_context:
         MIGRATION_HISTORY_COLLECTION_NAME = current_app.config['MIGRATION_HISTORY_COLLECTION_NAME']
         MIGRATION_STATE_COLLECTION_NAME = current_app.config['MIGRATION_STATE_COLLECTION_NAME']
+        CREDENTIALS_COLLECTION_NAME = current_app.config['CREDENTIALS_COLLECTION_NAME']
         migration_id = ObjectId(migration_id_str)
         
         def log_to_db(level, message):
@@ -40,43 +41,74 @@ def do_migration_with_checkpointing(app_context, migration_id_str, config):
         )
         
         try:
+            # --- NEW: Fetch and decrypt credentials ---
+            def get_credentials(credential_id):
+                if not credential_id:
+                    log_to_db('info', "No credential profile selected. Attempting to use EC2 Instance Role.")
+                    return None, None # Use instance role
+
+                cred_doc = current_app.db[CREDENTIALS_COLLECTION_NAME].find_one({'_id': ObjectId(credential_id)})
+                
+                if not cred_doc:
+                    raise ValueError(f"Credential with ID {credential_id} not found.")
+                
+                # Security check: Make sure the credential belongs to the user who started the migration
+                if cred_doc.get('user_id') != config.get('initiating_user_id'):
+                    raise ValueError(f"Permission denied for credential ID {credential_id}.")
+                
+                access_key = cred_doc['access_key']
+                secret_key = decrypt_data(cred_doc['secret_key_encrypted'])
+                
+                if secret_key == "DECRYPTION_ERROR":
+                     raise ValueError(f"Failed to decrypt secret for credential '{cred_doc['profile_name']}'. The app's SECRET_KEY may have changed.")
+                
+                log_to_db('info', f"Using credential profile: {cred_doc['profile_name']}")
+                return access_key, secret_key
+
+            source_access_key, source_secret_key = get_credentials(config.get('source_credential_id'))
+            dest_access_key, dest_secret_key = get_credentials(config.get('dest_credential_id'))
+
             source_s3 = boto3.client(
                 's3', region_name=config['source_region'],
-                aws_access_key_id=config.get('source_access_key') or None,
-                aws_secret_access_key=config.get('source_secret_key') or None,
+                aws_access_key_id=source_access_key,
+                aws_secret_access_key=source_secret_key,
                 config=botocore.client.Config(signature_version='s3v4')
             )
             dest_s3 = boto3.client(
                 's3', region_name=config['dest_region'],
-                aws_access_key_id=config.get('dest_access_key') or None,
-                aws_secret_access_key=config.get('dest_secret_key') or None,
+                aws_access_key_id=dest_access_key,
+                aws_secret_access_key=dest_secret_key,
                 config=botocore.client.Config(signature_version='s3v4')
             )
-            log_to_db('info', 'S3 clients initialized.')
+            log_to_db('info', 'S3 clients initialized successfully.')
         except Exception as e:
-            log_to_db('error', f"Failed to initialize S3 clients: {e}")
+            log_to_db('error', f"Failed during setup: {e}")
             current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].update_one({'_id': migration_id}, {'$set': {'status': 'failed'}})
             current_app.db[MIGRATION_STATE_COLLECTION_NAME].update_one({'_id': 'live_migration_status'}, {'$set': {'is_running': False}})
             return
             
         try:
             log_to_db('info', f"Scanning source: s3://{config['source_bucket']}/{config['source_prefix']}")
-            all_source_objects = [obj for page in source_s3.get_paginator('list_objects_v2').paginate(Bucket=config['source_bucket'], Prefix=config['source_prefix']) for obj in page.get('Contents', [])]
+            all_source_objects = [obj for page in source_s3.get_paginator('list_objects_v2').paginate(Bucket=config['source_bucket'], Prefix=config['source_prefix']) for obj in page.get('Contents', []) if obj.get('Size', 0) > 0]
             
             log_to_db('info', f"Scanning destination: s3://{config['dest_bucket']}/{config['dest_prefix']}")
             dest_files_map = {item['Key']: item['Size'] for page in dest_s3.get_paginator('list_objects_v2').paginate(Bucket=config['dest_bucket'], Prefix=config['dest_prefix']) for item in page.get('Contents', [])}
             
-            source_prefix_len = len(config['source_prefix'])
-            dest_prefix = config['dest_prefix']
-            files_to_copy = [obj for obj in all_source_objects if (dest_prefix + obj['Key'][source_prefix_len:]) not in dest_files_map or dest_files_map[dest_prefix + obj['Key'][source_prefix_len:]] != obj['Size']]
+            source_prefix = config.get('source_prefix', '')
+            dest_prefix = config.get('dest_prefix', '')
+            files_to_copy = [obj for obj in all_source_objects if (dest_prefix + obj['Key'][len(source_prefix):]) not in dest_files_map or dest_files_map[dest_prefix + obj['Key'][len(source_prefix):]] != obj['Size']]
             
             total_files_to_copy = len(files_to_copy)
             log_to_db('info', f"Found {len(all_source_objects)} source files. Checkpointing determined {total_files_to_copy} files need to be copied.")
             current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].update_one({'_id': migration_id}, {'$set': {'total_files': total_files_to_copy, 'files_scanned': len(all_source_objects)}})
             
+            if total_files_to_copy == 0:
+                log_to_db('info', "All files are already synchronized.")
+                # Fall through to the finalize step
+
             copied_count, failed_count = 0, 0
             for i, obj_to_copy in enumerate(files_to_copy):
-                source_key = obj_to_copy['Key']; relative_key = source_key[source_prefix_len:]
+                source_key = obj_to_copy['Key']; relative_key = source_key[len(source_prefix):]
                 dest_key = dest_prefix + relative_key
                 try:
                     dest_s3.copy_object(CopySource={'Bucket': config['source_bucket'], 'Key': source_key}, Bucket=config['dest_bucket'], Key=dest_key)
@@ -101,10 +133,13 @@ def do_migration_with_checkpointing(app_context, migration_id_str, config):
         finally:
             current_app.db[MIGRATION_STATE_COLLECTION_NAME].update_one({'_id': 'live_migration_status'}, {'$set': {'is_running': False}})
 
+# --- Routes for Migration ---
 @migration_bp.route('/dashboard')
 @login_required
 def dashboard():
-    return render_template('dashboard.html')
+    CREDENTIALS_COLLECTION_NAME = current_app.config['CREDENTIALS_COLLECTION_NAME']
+    credentials = list(current_app.db[CREDENTIALS_COLLECTION_NAME].find({'user_id': current_user.id}))
+    return render_template('dashboard.html', credentials=credentials)
 
 @migration_bp.route('/trigger-migration', methods=['POST'])
 @login_required
@@ -116,10 +151,12 @@ def trigger_migration():
         return jsonify({'status': 'error', 'message': 'A migration is already in progress.'}), 409
     
     config = {k: v for k, v in request.form.items()}
+    config['initiating_user_id'] = current_user.id # Add user ID for security check in thread
+    
     if not all([config.get('source_region'), config.get('source_bucket'), config.get('dest_region'), config.get('dest_bucket')]):
         return jsonify({'status': 'error', 'message': 'Missing required fields: regions and bucket names.'}), 400
 
-    migration_record = {'user_id': current_user.id, 'username': current_user.username, 'status': 'starting', 'config': {k: v for k, v in config.items() if 'secret' not in k and 'key' not in k}, 'start_time': time.time(), 'progress': 0, 'logs': []}
+    migration_record = {'user_id': current_user.id, 'username': current_user.username, 'status': 'starting', 'config': {k: v for k, v in config.items() if k != 'initiating_user_id'}, 'start_time': time.time(), 'progress': 0, 'logs': []}
     result = current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].insert_one(migration_record)
     migration_id = str(result.inserted_id)
     
@@ -161,28 +198,19 @@ def migration_status_stream():
 @migration_bp.route('/history')
 @login_required
 def history():
+    from datetime import datetime
     MIGRATION_HISTORY_COLLECTION_NAME = current_app.config['MIGRATION_HISTORY_COLLECTION_NAME']
     
-    # Fetch all past migrations for the currently logged-in user
     migrations_cursor = current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].find(
         {'user_id': current_user.id}
     ).sort('start_time', -1).limit(50)
     
-    # --- FIX IS HERE: Convert timestamps to datetime objects before rendering ---
     migrations_list = []
     for migration in migrations_cursor:
-        # Convert start_time if it exists and is a number
         if migration.get('start_time') and isinstance(migration.get('start_time'), (int, float)):
             migration['start_time_dt'] = datetime.fromtimestamp(migration['start_time'])
-        else:
-            migration['start_time_dt'] = None
-            
-        # Convert end_time if it exists and is a number
         if migration.get('end_time') and isinstance(migration.get('end_time'), (int, float)):
             migration['end_time_dt'] = datetime.fromtimestamp(migration['end_time'])
-        else:
-            migration['end_time_dt'] = None
-            
         migrations_list.append(migration)
         
     return render_template('history.html', migrations=migrations_list)

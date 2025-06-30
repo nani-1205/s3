@@ -7,3 +7,4 @@ qrcode[pil]
 python-dotenv
 boto3
 gunicorn
+cryptography

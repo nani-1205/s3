@@ -11,23 +11,20 @@ from bson.objectid import ObjectId
 import pyotp
 from werkzeug.security import generate_password_hash
 
-# Import the extension instances from extensions.py
 from extensions import mongo_client, login_manager
 
 def create_app():
-    """Application Factory: Creates and configures the Flask application."""
     load_dotenv()
     
     app = Flask(__name__)
     
-    # --- Configuration ---
-    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "a-super-secret-key-that-you-should-change")
+    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-key-please-change")
     
     app.config['USERS_COLLECTION_NAME'] = os.getenv("USERS_COLLECTION", "users")
     app.config['MIGRATION_HISTORY_COLLECTION_NAME'] = os.getenv("MIGRATION_HISTORY_COLLECTION", "migration_history")
     app.config['MIGRATION_STATE_COLLECTION_NAME'] = os.getenv("MIGRATION_STATE_COLLECTION", "migration_state")
+    app.config['CREDENTIALS_COLLECTION_NAME'] = os.getenv("CREDENTIALS_COLLECTION", "credentials") # <-- ADDED
 
-    # --- MongoDB Connection Setup ---
     mongo_host = os.getenv("MONGO_HOST")
     mongo_port = int(os.getenv("MONGO_PORT", 27017))
     mongo_user = os.getenv("MONGO_USER")
@@ -45,29 +42,26 @@ def create_app():
 
     app.logger.info(f"Connecting to MongoDB at {mongo_host} to use database '{mongo_app_db}'")
 
-    # --- Initialize Extensions with the App ---
     mongo_client.init_app(app)
     login_manager.init_app(app)
     login_manager.login_view = 'auth.login'
     
-    # --- Define a database object for the app context ---
     with app.app_context():
         app.db = mongo_client.cx[mongo_app_db]
     
-    # --- Import and Register Blueprints ---
     from auth import auth_bp
     from migration import migration_bp
+    from credentials import credentials_bp # <-- ADDED
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(migration_bp)
-
-    # --- Import Models and Define User Loader ---
+    app.register_blueprint(credentials_bp) # <-- ADDED
+    
     from models import User
     
     @login_manager.user_loader
     def load_user(user_id):
         return User.find_by_id(user_id)
         
-    # --- Base Route ---
     @app.route('/')
     def index():
         if not current_user.is_authenticated:
@@ -76,12 +70,11 @@ def create_app():
 
     return app
 
-# --- Create the Flask App Instance ---
 app = create_app()
 
-# --- Main execution block ---
 if __name__ == '__main__':
     with app.app_context():
+        # ... (startup checks are the same as before) ...
         app.db[app.config['MIGRATION_STATE_COLLECTION_NAME']].update_one(
             {'_id': 'live_migration_status'},
             {'$setOnInsert': {'is_running': False, 'last_updated': time.time()}},
@@ -92,12 +85,9 @@ if __name__ == '__main__':
             hashed_password = generate_password_hash('changethispassword')
             otp_secret = pyotp.random_base32()
             app.db[app.config['USERS_COLLECTION_NAME']].insert_one({
-                'username': 'admin', 
-                'password': hashed_password, 
-                'otp_secret': otp_secret,
-                'otp_confirmed': False  # NEW FIELD: This is crucial for the new login flow
+                'username': 'admin', 'password': hashed_password, 'otp_secret': otp_secret, 'otp_confirmed': False
             })
-            app.logger.warning("Default user 'admin' created with password 'changethispassword'. PLEASE CHANGE THIS and set up 2FA upon first login.")
+            app.logger.warning("Default user 'admin' created. PLEASE CHANGE PASSWORD and set up 2FA.")
 
-    app.logger.info("Application server started and ready.")
+    app.logger.info("Application server started.")
     app.run(debug=os.getenv("FLASK_DEBUG", "False").lower() == "true", host='0.0.0.0', port=5000, threaded=True)
