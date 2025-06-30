@@ -3,6 +3,7 @@
 import threading
 import time
 import json
+from datetime import datetime # <--- IMPORTED DATETIME
 from flask import Blueprint, render_template, jsonify, request, Response, stream_with_context, current_app
 from flask_login import login_required, current_user
 from bson.objectid import ObjectId
@@ -11,11 +12,13 @@ import botocore
 
 migration_bp = Blueprint('migration', __name__)
 
+# --- Helper to get the current state doc from MongoDB ---
 def get_live_migration_state():
     MIGRATION_STATE_COLLECTION_NAME = current_app.config['MIGRATION_STATE_COLLECTION_NAME']
     state = current_app.db[MIGRATION_STATE_COLLECTION_NAME].find_one({'_id': 'live_migration_status'})
     return state if state else {'is_running': False}
 
+# --- Core Migration Task (with Checkpointing) ---
 def do_migration_with_checkpointing(app_context, migration_id_str, config):
     with app_context:
         MIGRATION_HISTORY_COLLECTION_NAME = current_app.config['MIGRATION_HISTORY_COLLECTION_NAME']
@@ -23,6 +26,7 @@ def do_migration_with_checkpointing(app_context, migration_id_str, config):
         migration_id = ObjectId(migration_id_str)
         
         def log_to_db(level, message):
+            """Helper to log messages to the migration history document."""
             timestamp = time.time()
             log_entry = {'level': level, 'message': message, 'timestamp': timestamp}
             current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].update_one(
@@ -158,5 +162,27 @@ def migration_status_stream():
 @login_required
 def history():
     MIGRATION_HISTORY_COLLECTION_NAME = current_app.config['MIGRATION_HISTORY_COLLECTION_NAME']
-    migrations = list(current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].find({'user_id': current_user.id}).sort('start_time', -1).limit(50))
-    return render_template('history.html', migrations=migrations)
+    
+    # Fetch all past migrations for the currently logged-in user
+    migrations_cursor = current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].find(
+        {'user_id': current_user.id}
+    ).sort('start_time', -1).limit(50)
+    
+    # --- FIX IS HERE: Convert timestamps to datetime objects before rendering ---
+    migrations_list = []
+    for migration in migrations_cursor:
+        # Convert start_time if it exists and is a number
+        if migration.get('start_time') and isinstance(migration.get('start_time'), (int, float)):
+            migration['start_time_dt'] = datetime.fromtimestamp(migration['start_time'])
+        else:
+            migration['start_time_dt'] = None
+            
+        # Convert end_time if it exists and is a number
+        if migration.get('end_time') and isinstance(migration.get('end_time'), (int, float)):
+            migration['end_time_dt'] = datetime.fromtimestamp(migration['end_time'])
+        else:
+            migration['end_time_dt'] = None
+            
+        migrations_list.append(migration)
+        
+    return render_template('history.html', migrations=migrations_list)

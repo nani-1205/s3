@@ -10,40 +10,47 @@
         <thead>
             <tr>
                 <th>Start Time</th>
+                <th>End Time</th>
                 <th>Status</th>
                 <th>Source</th>
                 <th>Destination</th>
-                <th>Progress</th>
                 <th>Details</th>
             </tr>
         </thead>
         <tbody>
             {% for migration in migrations %}
             <tr>
-                <td>{{ migration.start_time.strftime('%Y-%m-%d %H:%M:%S') if migration.start_time else 'N/A' }}</td>
+                {# Use the new '_dt' suffixed fields for formatting #}
+                <td>{{ migration.start_time_dt.strftime('%Y-%m-%d %H:%M:%S') if migration.start_time_dt else 'N/A' }}</td>
+                <td>{{ migration.end_time_dt.strftime('%Y-%m-%d %H:%M:%S') if migration.end_time_dt else 'In Progress / N/A' }}</td>
                 <td>
-                    <span class="status-badge {{ migration.status }}">{{ migration.status.replace('_', ' ')|title }}</span>
+                    {% if migration.status %}
+                        <span class="status-badge {{ migration.status }}">{{ migration.status.replace('_', ' ')|title }}</span>
+                    {% else %}
+                        <span class="status-badge unknown">Unknown</span>
+                    {% endif %}
                 </td>
                 <td>
-                    {{ migration.config.source_bucket }}/{{ migration.config.source_prefix }}
+                    {# Use .get() for safer access to nested dictionary keys #}
+                    {{ migration.get('config', {}).get('source_bucket', 'N/A') }}/{{ migration.get('config', {}).get('source_prefix', '') }}
                 </td>
                 <td>
-                    {{ migration.config.dest_bucket }}/{{ migration.config.dest_prefix }}
+                    {{ migration.get('config', {}).get('dest_bucket', 'N/A') }}/{{ migration.get('config', {}).get('dest_prefix', '') }}
                 </td>
-                <td>{{ "%.2f"|format(migration.progress or 0) }}%</td>
                 <td>
-                    Files Scanned: {{ migration.files_scanned or 0 }}<br>
-                    Files to Copy: {{ migration.total_files or 0 }}<br>
-                    Completed: {{ migration.files_completed or 0 }}<br>
-                    Failed: {{ migration.files_failed or 0 }}
+                    Files Scanned: {{ migration.get('files_scanned', 0)|int }}<br>
+                    Files to Copy: {{ migration.get('total_files', 0)|int }}<br>
+                    Completed: {{ migration.get('files_completed', 0)|int }}<br>
+                    Failed: {{ migration.get('files_failed', 0)|int }}
                 </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <div class="auth-card" style="max-width: none;">
+    <div class="auth-card" style="max-width: none; text-align: center;">
         <p>No migration history found for your account.</p>
+        <a href="{{ url_for('migration.dashboard') }}" class="auth-button" style="display: inline-block; width: auto; margin-top: 20px;">Start a New Migration</a>
     </div>
     {% endif %}
 </div>
