@@ -6,22 +6,20 @@ import json
 from flask import Blueprint, render_template, jsonify, request, Response, stream_with_context, current_app
 from flask_login import login_required, current_user
 from bson.objectid import ObjectId
-from app import MIGRATION_HISTORY_COLLECTION_NAME, MIGRATION_STATE_COLLECTION_NAME
 import boto3
 import botocore
 
 migration_bp = Blueprint('migration', __name__)
 
 def get_live_migration_state():
+    MIGRATION_STATE_COLLECTION_NAME = current_app.config['MIGRATION_STATE_COLLECTION_NAME']
     state = current_app.db[MIGRATION_STATE_COLLECTION_NAME].find_one({'_id': 'live_migration_status'})
     return state if state else {'is_running': False}
 
 def do_migration_with_checkpointing(app_context, migration_id_str, config):
-    """
-    Main migration task. Must be run within an application context
-    to have access to current_app and logging.
-    """
     with app_context:
+        MIGRATION_HISTORY_COLLECTION_NAME = current_app.config['MIGRATION_HISTORY_COLLECTION_NAME']
+        MIGRATION_STATE_COLLECTION_NAME = current_app.config['MIGRATION_STATE_COLLECTION_NAME']
         migration_id = ObjectId(migration_id_str)
         
         def log_to_db(level, message):
@@ -64,7 +62,9 @@ def do_migration_with_checkpointing(app_context, migration_id_str, config):
             log_to_db('info', f"Scanning destination: s3://{config['dest_bucket']}/{config['dest_prefix']}")
             dest_files_map = {item['Key']: item['Size'] for page in dest_s3.get_paginator('list_objects_v2').paginate(Bucket=config['dest_bucket'], Prefix=config['dest_prefix']) for item in page.get('Contents', [])}
             
-            files_to_copy = [obj for obj in all_source_objects if (config['dest_prefix'] + obj['Key'][len(config['source_prefix']):]) not in dest_files_map or dest_files_map[config['dest_prefix'] + obj['Key'][len(config['source_prefix']):]] != obj['Size']]
+            source_prefix_len = len(config['source_prefix'])
+            dest_prefix = config['dest_prefix']
+            files_to_copy = [obj for obj in all_source_objects if (dest_prefix + obj['Key'][source_prefix_len:]) not in dest_files_map or dest_files_map[dest_prefix + obj['Key'][source_prefix_len:]] != obj['Size']]
             
             total_files_to_copy = len(files_to_copy)
             log_to_db('info', f"Found {len(all_source_objects)} source files. Checkpointing determined {total_files_to_copy} files need to be copied.")
@@ -72,8 +72,8 @@ def do_migration_with_checkpointing(app_context, migration_id_str, config):
             
             copied_count, failed_count = 0, 0
             for i, obj_to_copy in enumerate(files_to_copy):
-                source_key = obj_to_copy['Key']; relative_key = source_key[len(config['source_prefix']):]
-                dest_key = config['dest_prefix'] + relative_key
+                source_key = obj_to_copy['Key']; relative_key = source_key[source_prefix_len:]
+                dest_key = dest_prefix + relative_key
                 try:
                     dest_s3.copy_object(CopySource={'Bucket': config['source_bucket'], 'Key': source_key}, Bucket=config['dest_bucket'], Key=dest_key)
                     copied_count += 1
@@ -105,6 +105,9 @@ def dashboard():
 @migration_bp.route('/trigger-migration', methods=['POST'])
 @login_required
 def trigger_migration():
+    MIGRATION_HISTORY_COLLECTION_NAME = current_app.config['MIGRATION_HISTORY_COLLECTION_NAME']
+    MIGRATION_STATE_COLLECTION_NAME = current_app.config['MIGRATION_STATE_COLLECTION_NAME']
+    
     if get_live_migration_state().get('is_running'):
         return jsonify({'status': 'error', 'message': 'A migration is already in progress.'}), 409
     
@@ -112,7 +115,7 @@ def trigger_migration():
     if not all([config.get('source_region'), config.get('source_bucket'), config.get('dest_region'), config.get('dest_bucket')]):
         return jsonify({'status': 'error', 'message': 'Missing required fields: regions and bucket names.'}), 400
 
-    migration_record = {'user_id': current_user.id, 'username': current_user.username, 'status': 'starting', 'config': {k: v for k, v in config.items() if 'secret' not in k and 'key' not in k}, 'start_time': time.time(), 'progress': 0, 'logs': [{'level': 'info', 'message': 'Migration initiated by user.', 'timestamp': time.time()}]}
+    migration_record = {'user_id': current_user.id, 'username': current_user.username, 'status': 'starting', 'config': {k: v for k, v in config.items() if 'secret' not in k and 'key' not in k}, 'start_time': time.time(), 'progress': 0, 'logs': []}
     result = current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].insert_one(migration_record)
     migration_id = str(result.inserted_id)
     
@@ -126,6 +129,7 @@ def trigger_migration():
 @migration_bp.route('/migration-status-stream')
 @login_required
 def migration_status_stream():
+    MIGRATION_HISTORY_COLLECTION_NAME = current_app.config['MIGRATION_HISTORY_COLLECTION_NAME']
     def generate():
         last_sent_json = ""
         while True:
@@ -153,5 +157,6 @@ def migration_status_stream():
 @migration_bp.route('/history')
 @login_required
 def history():
+    MIGRATION_HISTORY_COLLECTION_NAME = current_app.config['MIGRATION_HISTORY_COLLECTION_NAME']
     migrations = list(current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].find({'user_id': current_user.id}).sort('start_time', -1).limit(50))
     return render_template('history.html', migrations=migrations)

@@ -8,29 +8,27 @@ from flask_login import current_user
 from dotenv import load_dotenv
 from urllib.parse import quote_plus
 from bson.objectid import ObjectId
+import pyotp
+from werkzeug.security import generate_password_hash
 
 # Import the extension instances from extensions.py
 from extensions import mongo_client, login_manager
 
-# --- Load Environment Variables ---
-load_dotenv()
-
-# --- Global Variables for Collection Names ---
-# These can be defined here as they don't depend on the app object
-USERS_COLLECTION_NAME = os.getenv("USERS_COLLECTION", "users")
-MIGRATION_HISTORY_COLLECTION_NAME = os.getenv("MIGRATION_HISTORY_COLLECTION", "migration_history")
-MIGRATION_STATE_COLLECTION_NAME = os.getenv("MIGRATION_STATE_COLLECTION", "migration_state")
-
-# --- Application Factory Function ---
 def create_app():
     """
-    Creates and configures an instance of the Flask application.
+    Application Factory: Creates and configures the Flask application.
     """
+    load_dotenv()
+    
     app = Flask(__name__)
     
-    # --- Configuration ---
-    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-key-please-change")
+    # --- Load Configuration from .env into Flask's app.config ---
+    app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "a-super-secret-key-that-you-should-change")
     
+    app.config['USERS_COLLECTION_NAME'] = os.getenv("USERS_COLLECTION", "users")
+    app.config['MIGRATION_HISTORY_COLLECTION_NAME'] = os.getenv("MIGRATION_HISTORY_COLLECTION", "migration_history")
+    app.config['MIGRATION_STATE_COLLECTION_NAME'] = os.getenv("MIGRATION_STATE_COLLECTION", "migration_state")
+
     # --- MongoDB Connection Setup ---
     mongo_host = os.getenv("MONGO_HOST")
     mongo_port = int(os.getenv("MONGO_PORT", 27017))
@@ -54,25 +52,24 @@ def create_app():
     login_manager.init_app(app)
     login_manager.login_view = 'auth.login'
     
+    # --- Define a database object for the app context ---
+    # This makes it easy to access the correct database via current_app.db
+    with app.app_context():
+        app.db = mongo_client.cx[mongo_app_db]
+    
     # --- Import and Register Blueprints ---
     from auth import auth_bp
     from migration import migration_bp
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(migration_bp)
 
-    # --- Import Models (now safe to do so within the factory) ---
+    # --- Import Models and Define User Loader within the factory scope ---
     from models import User
     
     @login_manager.user_loader
     def load_user(user_id):
-        # This function needs to be defined within the app context
         return User.find_by_id(user_id)
         
-    # --- Define a database object for the app context ---
-    # This makes it easy to access the correct database via current_app.db
-    with app.app_context():
-        app.db = mongo_client.cx[mongo_app_db]
-    
     # --- Base Route ---
     @app.route('/')
     def index():
@@ -82,19 +79,26 @@ def create_app():
 
     return app
 
-# --- Create the Flask App Instance using the factory ---
-# This instance will be imported by your WSGI server (like Gunicorn) or used by `if __name__ == '__main__':`
+# --- Create the Flask App Instance ---
 app = create_app()
 
 # --- Main execution block for direct run (`python app.py`) ---
 if __name__ == '__main__':
     with app.app_context():
-        # Initialize the migration state document on startup
-        app.db[MIGRATION_STATE_COLLECTION_NAME].update_one(
+        # Initialize startup documents
+        app.db[app.config['MIGRATION_STATE_COLLECTION_NAME']].update_one(
             {'_id': 'live_migration_status'},
             {'$setOnInsert': {'is_running': False, 'last_updated': time.time()}},
             upsert=True
         )
-        app.logger.info("Application server started and ready.")
-        
+        if app.db[app.config['USERS_COLLECTION_NAME']].count_documents({'username': 'admin'}) == 0:
+            app.logger.info("No 'admin' user found. Creating default admin user...")
+            hashed_password = generate_password_hash('changethispassword')
+            otp_secret = pyotp.random_base32()
+            app.db[app.config['USERS_COLLECTION_NAME']].insert_one({
+                'username': 'admin', 'password': hashed_password, 'otp_secret': otp_secret
+            })
+            app.logger.warning("Default user 'admin' created with password 'changethispassword'. PLEASE CHANGE THIS and set up 2FA upon first login.")
+
+    app.logger.info("Application server started and ready.")
     app.run(debug=os.getenv("FLASK_DEBUG", "False").lower() == "true", host='0.0.0.0', port=5000, threaded=True)

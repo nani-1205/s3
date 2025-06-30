@@ -3,7 +3,6 @@
 from flask import current_app
 from flask_login import UserMixin
 from bson.objectid import ObjectId
-from app import USERS_COLLECTION_NAME # Importing variables is fine
 
 class User(UserMixin):
     def __init__(self, user_data):
@@ -15,8 +14,10 @@ class User(UserMixin):
     @staticmethod
     def find_by_username(username):
         """Finds a user in the database by their username."""
-        # Use current_app.db to access the database within a request context
-        user_data = current_app.db[USERS_COLLECTION_NAME].find_one({'username': username})
+        # Get the collection name from the app's config
+        collection_name = current_app.config['USERS_COLLECTION_NAME']
+        # Access the db object from the current application context
+        user_data = current_app.db[collection_name].find_one({'username': username})
         if user_data:
             return User(user_data)
         return None
@@ -24,9 +25,10 @@ class User(UserMixin):
     @staticmethod
     def find_by_id(user_id):
         """Finds a user by their ObjectId. Required by Flask-Login."""
+        collection_name = current_app.config['USERS_COLLECTION_NAME']
         try:
             # Use current_app.db to access the database
-            user_data = current_app.db[USERS_COLLECTION_NAME].find_one({'_id': ObjectId(user_id)})
+            user_data = current_app.db[collection_name].find_one({'_id': ObjectId(user_id)})
             if user_data:
                 return User(user_data)
         except Exception:

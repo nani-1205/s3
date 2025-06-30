@@ -7,7 +7,6 @@ import base64
 from flask import Blueprint, render_template, redirect, url_for, flash, request, current_app
 from flask_login import login_user, logout_user, login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
-from app import USERS_COLLECTION_NAME # Importing variables is fine
 from models import User
 
 auth_bp = Blueprint('auth', __name__)
@@ -18,6 +17,7 @@ def register():
         return redirect(url_for('migration.dashboard'))
 
     if request.method == 'POST':
+        USERS_COLLECTION_NAME = current_app.config['USERS_COLLECTION_NAME']
         username = request.form.get('username')
         password = request.form.get('password')
         
@@ -59,13 +59,12 @@ def login():
         password = request.form.get('password')
         otp_token = request.form.get('otp')
         
-        user_data = current_app.db[USERS_COLLECTION_NAME].find_one({'username': username})
+        user = User.find_by_username(username)
         
-        if not user_data or not check_password_hash(user_data.get('password'), password):
+        if not user or not check_password_hash(user.password_hash, password):
             flash('Invalid username or password. Please try again.', 'danger')
             return redirect(url_for('auth.login'))
             
-        user = User(user_data)
         totp = pyotp.TOTP(user.otp_secret)
         if not totp.verify(otp_token):
             flash('Invalid 2FA token. Please try again.', 'danger')
