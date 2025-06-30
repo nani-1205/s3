@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+
+{% block title %}2FA Setup & Confirmation{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        {% if not user_is_confirmed %}
+            <h1>Confirm 2-Factor Authentication</h1>
+            <p>Scan the QR code below with your authenticator app, then enter the 6-digit code to confirm.</p>
+        {% else %}
+            <h1>2-Factor Authentication</h1>
+            <p>Your 2FA is already set up. This is your recovery QR code.</p>
+        {% endif %}
+        
+        <div class="qr-code-container">
+            <img src="data:image/png;base64,{{ qr_code }}" alt="QR Code for 2FA">
+        </div>
+
+        {% if not user_is_confirmed %}
+            <form method="POST" action="{{ url_for('auth.two_factor_setup') }}">
+                <div class="form-group">
+                    <label for="otp">Enter 6-Digit Code</label>
+                    <input type="text" id="otp" name="otp" class="form-control" required autocomplete="one-time-code" inputmode="numeric" pattern="\d{6}">
+                </div>
+                <button type="submit" class="auth-button">Confirm & Continue</button>
+            </form>
+        {% else %}
+            <a href="{{ url_for('migration.dashboard') }}" class="auth-button">Go to Dashboard</a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

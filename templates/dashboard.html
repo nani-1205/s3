@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block title %}Migration Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <div class="form-card">
+        <h2>🚀 New Migration</h2>
+        <form id="migrationForm">
+            <h3>Source Details</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="source_credential_id">Source Credential Profile</label>
+                    <select id="source_credential_id" name="source_credential_id" class="form-control">
+                        <option value="">-- Use EC2 Instance Role (if available) --</option>
+                        {% for cred in credentials %}
+                        <option value="{{ cred._id }}">{{ cred.profile_name }} ({{ cred.access_key }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label for="source_region">Source Region</label><input type="text" id="source_region" name="source_region" class="form-control" required></div>
+                <div class="form-group"><label for="source_bucket">Source Bucket</label><input type="text" id="source_bucket" name="source_bucket" class="form-control" required></div>
+                <div class="form-group"><label for="source_prefix">Source Prefix</label><input type="text" id="source_prefix" name="source_prefix" class="form-control" placeholder="e.g., folder/subfolder/"></div>
+            </div>
+            
+            <hr style="margin: 25px 0; border: 1px solid #eee;">
+            <h3>Destination Details</h3>
+            <div class="form-row">
+                 <div class="form-group">
+                    <label for="dest_credential_id">Destination Credential Profile</label>
+                    <select id="dest_credential_id" name="dest_credential_id" class="form-control">
+                        <option value="">-- Use EC2 Instance Role (if available) --</option>
+                        {% for cred in credentials %}
+                        <option value="{{ cred._id }}">{{ cred.profile_name }} ({{ cred.access_key }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label for="dest_region">Destination Region</label><input type="text" id="dest_region" name="dest_region" class="form-control" required></div>
+                <div class="form-group"><label for="dest_bucket">Destination Bucket</label><input type="text" id="dest_bucket" name="dest_bucket" class="form-control" required></div>
+                <div class="form-group"><label for="dest_prefix">Destination Prefix</label><input type="text" id="dest_prefix" name="dest_prefix" class="form-control" placeholder="e.g., new/folder/"></div>
+            </div>
+            <button type="submit" class="auth-button" id="startButton"><span id="buttonText">🚀 Start Migration</span></button>
+        </form>
+    </div>
+
+    <div class="status-card">
+        <h2>Live Status</h2>
+        <div id="statusContent"><p style="text-align: center; color: var(--text-muted); padding: 20px;">Fill out the form and click "Start Migration" to see live progress here.</p></div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const migrationForm = document.getElementById('migrationForm');
+        const startButton = document.getElementById('startButton');
+        const buttonText = document.getElementById('buttonText');
+        const statusContent = document.getElementById('statusContent');
+        let isMigrationGloballyRunning = false;
+        let eventSource;
+
+        migrationForm.addEventListener('submit', function(event) {
+            event.preventDefault(); 
+            if (isMigrationGloballyRunning) {
+                alert('A migration is already in progress. Please wait.');
+                return;
+            }
+            startButton.disabled = true;
+            buttonText.innerHTML = '<span class="loading-spinner"></span> Initializing...';
+            
+            const formData = new FormData(migrationForm);
+
+            fetch("{{ url_for('migration.trigger_migration') }}", {
+                method: 'POST', body: formData
+            })
+            .then(response => response.json().then(data => ({ ok: response.ok, data })))
+            .then(({ ok, data }) => {
+                if (!ok) throw new Error(data.message || 'Failed to start migration.');
+            })
+            .catch(error => {
+                console.error('Error triggering migration:', error);
+                alert(`Error: ${error.message}`);
+                startButton.disabled = false;
+                buttonText.textContent = '🚀 Start Migration';
+            });
+        });
+
+        function connectToStatusStream() {
+            if (eventSource) eventSource.close();
+            eventSource = new EventSource("{{ url_for('migration.migration_status_stream') }}");
+            
+            eventSource.onmessage = (event) => {
+                if (event.data.startsWith(':')) return;
+                try {
+                    const status = JSON.parse(event.data);
+                    updateUI(status);
+                } catch (e) { console.error("Error parsing status JSON:", e); }
+            };
+            eventSource.onerror = () => {
+                console.error("Status stream error. Reconnecting...");
+                eventSource.close();
+                setTimeout(connectToStatusStream, 5000);
+            };
+        }
+
+        function updateUI(status) {
+            isMigrationGloballyRunning = status.is_running || false;
+            
+            startButton.disabled = isMigrationGloballyRunning;
+            if (isMigrationGloballyRunning) {
+                buttonText.innerHTML = '<span class="loading-spinner"></span> Migration in Progress...';
+            } else {
+                buttonText.textContent = '🚀 Start Migration';
+                if (status.completion_status === 'completed_fully') buttonText.textContent = '✅ Migration Complete';
+                if (status.completion_status === 'completed_partial' || status.completion_status === 'failed') buttonText.textContent = '⚠️ Issues Encountered (Retry?)';
+            }
+            
+            const progress = status.progress || 0;
+            let statusHTML = `
+                <div class="stats-grid">
+                    <div class="stat-card"><div class="stat-value">${(status.total_files || 0).toLocaleString()}</div><div class="stat-label">Files to Copy</div></div>
+                    <div class="stat-card"><div class="stat-value">${(status.files_completed || 0).toLocaleString()}</div><div class="stat-label">Completed</div></div>
+                    <div class="stat-card"><div class="stat-value">${(status.files_failed || 0).toLocaleString()}</div><div class="stat-label">Failed</div></div>
+                    <div class="stat-card"><div class="stat-value">${(status.files_scanned || 0).toLocaleString()}</div><div class="stat-label">Files Scanned</div></div>
+                </div>
+                <div class="progress-section">
+                    <div class="progress-header"><div class="progress-title">Overall Progress</div><div class="progress-percentage">${Math.round(progress)}%</div></div>
+                    <div class="progress-bar-container"><div class="progress-bar" style="width: ${progress}%">${Math.round(progress)}%</div></div>
+                </div>
+            `;
+
+            if (status.last_log) {
+                statusHTML += `<div class="current-file"><div class="current-file-label">Last Log:</div><div class="current-file-name">${status.last_log}</div></div>`;
+            }
+
+            statusHTML += `<div class="log-section"><div class="log-header">📊 Migration Logs</div><div id="logContainer">${(status.logs || []).map(log => `<div class="log-entry ${log.level}">${log.message}</div>`).join('')}</div></div>`;
+            statusContent.innerHTML = statusHTML;
+            const logContainer = document.getElementById('logContainer');
+            if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
+        }
+        connectToStatusStream();
+    });
+</script>
+{% endblock %}

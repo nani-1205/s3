@@ -1,4 +1,10 @@
 Flask
-boto3
+Flask-Login
+Flask-PyMongo[srv]
+werkzeug
+pyotp
+qrcode[pil]
 python-dotenv
-gunicorn # Optional: for production-like deployment (but current shared state won't work with multi-worker gunicorn)
+boto3
+gunicorn
+cryptography

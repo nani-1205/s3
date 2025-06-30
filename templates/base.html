@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}S3 Migration Dashboard{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <nav class="navbar">
+        <a href="{{ url_for('index') }}" class="brand"><span class="icon">🚀</span> S3 Migration</a>
+        <div class="nav-links">
+            {% if current_user.is_authenticated %}
+                <a href="{{ url_for('migration.dashboard') }}">Dashboard</a>
+                <a href="{{ url_for('migration.history') }}">History</a>
+                
+                {# Show admin-only links #}
+                {% if current_user.is_admin %}
+                    <a href="{{ url_for('credentials.manage') }}">Credentials</a>
+                    <a href="{{ url_for('admin.user_list') }}">Admin</a>
+                {% endif %}
+
+                <span class="username">| Logged in as: {{ current_user.username }}</span>
+                <a href="{{ url_for('admin.user_change_password') }}">Change Password</a>
+                <a href="{{ url_for('auth.logout') }}">Logout</a>
+            {% else %}
+                <a href="{{ url_for('auth.login') }}">Login</a>
+                <a href="{{ url_for('auth.register') }}">Register</a>
+            {% endif %}
+        </div>
+    </nav>
+    <main class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <ul class="flash-messages">
+                {% for category, message in messages %}
+                    <li class="{{ category }}">{{ message }}</li>
+                {% endfor %}
+                </ul>
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </main>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

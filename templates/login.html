@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+
+{% block title %}Login{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <h1>Welcome Back!</h1>
+        <p>Log in to manage your S3 migrations.</p>
+        <form method="POST" action="{{ url_for('auth.login') }}">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" class="form-control" required>
+            </div>
+            <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" id="password" name="password" class="form-control" required>
+            </div>
+            <!-- 2FA field is hidden by default and shown for users who have confirmed 2FA -->
+            <div class="form-group" id="otp-group" style="display: none;">
+                <label for="otp">2FA Token</label>
+                <input type="text" id="otp" name="otp" class="form-control" autocomplete="one-time-code" inputmode="numeric" pattern="\d{6}">
+            </div>
+            <button type="submit" class="auth-button">Login</button>
+        </form>
+        <p class="auth-switch-link">
+            Don't have an account? <a href="{{ url_for('auth.register') }}">Register here</a>
+        </p>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // This simple script shows the 2FA field after the user types a username.
+    // A more advanced version could make an AJAX call to check if the user requires 2FA.
+    document.getElementById('username').addEventListener('blur', function() {
+        if (this.value.trim() !== '') {
+            document.getElementById('otp-group').style.display = 'block';
+        }
+    });
+</script>
+{% endblock %}
