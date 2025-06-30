@@ -7,7 +7,7 @@
     <!-- Configuration Form -->
     <div class="form-card">
         <h2>🚀 New Migration</h2>
-        <!-- The form tag itself doesn't need an action/method since we handle it with JS -->
+        <!-- The form ID is critical for our JavaScript -->
         <form id="migrationForm">
             <!-- Source Configuration -->
             <h3>Source Details</h3>
@@ -36,7 +36,6 @@
                 </div>
             </div>
             
-            <!-- Destination Configuration -->
             <hr style="margin: 25px 0; border: 1px solid #eee;">
             <h3>Destination Details</h3>
             <div class="form-row">
@@ -64,31 +63,21 @@
                 </div>
             </div>
 
-            <!-- 
-            ================================================================
-            THE FIX IS HERE: Add type="button" to the button element
-            ================================================================
-            -->
-            <button type="button" class="auth-button" id="startButton">Start Migration</button>
-
+            <!-- This can be a standard submit button now -->
+            <button type="submit" class="auth-button" id="startButton">
+                <span id="buttonText">🚀 Start Migration</span>
+            </button>
         </form>
     </div>
 
-    <!-- Status & Logs -->
+    <!-- Status & Logs Card -->
     <div class="status-card">
         <h2>Live Status</h2>
-        <div class="stats-grid">
-            <!-- Stats populated by JS -->
-        </div>
-        <div class="progress-section">
-            <!-- Progress populated by JS -->
-        </div>
-        <div class="current-file" style="display: none;">
-            <!-- Current file populated by JS -->
-        </div>
-        <div class="log-section">
-            <div class="log-header">📊 Migration Logs</div>
-            <div id="logContainer"></div>
+        <div id="statusContent">
+            <!-- Content will be populated by JS when migration starts -->
+            <p style="text-align: center; color: #7f8c8d; padding: 20px;">
+                Fill out the form and click "Start Migration" to see live progress here.
+            </p>
         </div>
     </div>
 </div>
@@ -96,44 +85,166 @@
 
 {% block scripts %}
 <script>
-    class S3MigrationDashboard {
-        constructor() {
-            this.form = document.getElementById('migrationForm');
-            this.startButton = document.getElementById('startButton');
-            // ... other elements
+document.addEventListener('DOMContentLoaded', function() {
+    const migrationForm = document.getElementById('migrationForm');
+    const startButton = document.getElementById('startButton');
+    const buttonText = document.getElementById('buttonText');
+    const statusContent = document.getElementById('statusContent');
+    let isMigrationGloballyRunning = false;
+    let eventSource;
+
+    // --- Main function to handle form submission ---
+    migrationForm.addEventListener('submit', function(event) {
+        // Prevent the default form submission which causes a page reload
+        event.preventDefault(); 
+        
+        if (isMigrationGloballyRunning) {
+            alert('A migration is already in progress. Please wait.');
+            return;
+        }
+
+        // Disable button and show loading state
+        startButton.disabled = true;
+        buttonText.innerHTML = '<span class="loading-spinner"></span> Initializing...';
+        
+        // Serialize form data
+        const formData = new FormData(migrationForm);
+
+        // Send the POST request to trigger the migration
+        fetch("{{ url_for('migration.trigger_migration') }}", {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json().then(data => ({ ok: response.ok, data })))
+        .then(({ ok, data }) => {
+            if (!ok) {
+                throw new Error(data.message || 'Failed to start migration.');
+            }
+            // Success! The UI will now update via the SSE stream.
+            // The SSE stream will tell us the migration is running, and the button will be updated there.
+            console.log('Migration initiated:', data.message);
+        })
+        .catch(error => {
+            console.error('Error triggering migration:', error);
+            alert(`Error: ${error.message}`);
+            // Re-enable the button on failure
+            startButton.disabled = false;
+            buttonText.textContent = '🚀 Start Migration';
+        });
+    });
+
+    // --- Function to connect to the SSE status stream ---
+    function connectToStatusStream() {
+        if (eventSource) {
+            eventSource.close();
+        }
+        eventSource = new EventSource("{{ url_for('migration.migration_status_stream') }}");
+
+        eventSource.onopen = () => console.log("Status stream connected.");
+        
+        eventSource.onmessage = (event) => {
+            if (event.data.startsWith(':')) return; // Ignore keep-alive pings
             
-            this.init();
-        }
+            try {
+                const status = JSON.parse(event.data);
+                updateUI(status);
+            } catch (e) {
+                console.error("Error parsing status JSON:", e, "Data:", event.data);
+            }
+        };
 
-        init() {
-            // We listen to the button click, not the form submit event
-            this.startButton.addEventListener('click', (event) => {
-                this.triggerMigration();
-            });
-
-            // Rest of your JS class...
-            // this.connectToStatusStream();
-            // All other methods...
-        }
-
-        triggerMigration() {
-            // ... existing triggerMigration logic ...
-            
-            // Serialize form data
-            const formData = new FormData(this.form);
-
-            fetch("{{ url_for('migration.trigger_migration') }}", { 
-                method: 'POST',
-                body: formData // Send the form data in the body of the POST request
-            })
-            // ... rest of the fetch logic
-        }
-
-        // ... PASTE THE REST OF YOUR S3MigrationDashboard JAVASCRIPT CLASS HERE ...
-        // No other changes are needed in the JS class itself.
+        eventSource.onerror = (err) => {
+            console.error("Status stream error:", err);
+            eventSource.close();
+            // Try to reconnect after a delay
+            setTimeout(connectToStatusStream, 5000);
+        };
     }
-    
-    // Make sure you have the full JavaScript class here as provided in the previous response.
-    // ...
+
+    // --- Function to update the entire UI based on received status ---
+    function updateUI(status) {
+        isMigrationGloballyRunning = status.is_running || false;
+        
+        // Update button state
+        startButton.disabled = isMigrationGloballyRunning;
+        if (isMigrationGloballyRunning) {
+            buttonText.innerHTML = '<span class="loading-spinner"></span> Migration in Progress...';
+        } else {
+            buttonText.textContent = '🚀 Start Migration';
+            // You can add logic here for 'Completed' or 'Failed' states if you want
+        }
+
+        // Update the status content area
+        let progressHTML = `
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value">${(status.total_files || 0).toLocaleString()}</div>
+                    <div class="stat-label">Total Files</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${(status.files_completed || 0).toLocaleString()}</div>
+                    <div class="stat-label">Transferred</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value">${formatBytes(status.total_size_bytes || 0)}</div>
+                    <div class="stat-label">Total Size</div>
+                </div>
+                 <div class="stat-card">
+                    <div class="stat-value">${(status.files_failed || 0).toLocaleString()}</div>
+                    <div class="stat-label">Failed</div>
+                </div>
+            </div>
+
+            <div class="progress-section">
+                <div class="progress-header">
+                    <div class="progress-title">Migration Progress</div>
+                    <div class="progress-percentage">${Math.round(status.progress || 0)}%</div>
+                </div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" style="width: ${status.progress || 0}%">${Math.round(status.progress || 0)}%</div>
+                </div>
+            </div>
+        `;
+
+        if (status.last_log) {
+            progressHTML += `
+                <div class="current-file">
+                    <div class="current-file-label">Last Log:</div>
+                    <div class="current-file-name">${status.last_log}</div>
+                </div>
+            `;
+        }
+
+        progressHTML += `
+            <div class="log-section">
+                <div class="log-header">📊 Migration Logs</div>
+                <div id="logContainer">
+                    ${(status.logs || []).map(log => `<div class="log-entry ${log.level}">${log.message}</div>`).join('')}
+                </div>
+            </div>
+        `;
+
+        statusContent.innerHTML = progressHTML;
+        
+        // Auto-scroll log container
+        const logContainer = document.getElementById('logContainer');
+        if (logContainer) {
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+    }
+
+    // --- Helper function for formatting bytes ---
+    function formatBytes(bytes, decimals = 1) {
+        if (!+bytes) return '0 Bytes';
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
+    }
+
+    // Start listening for status updates as soon as the page loads
+    connectToStatusStream();
+});
 </script>
 {% endblock %}
