@@ -1,9 +1,9 @@
 Flask
 Flask-Login
-Flask-Bcrypt  # For hashing passwords
-pymongo[srv]  # MongoDB driver
-pyotp         # For 2FA OTP generation
-qrcode[pil]   # For generating QR codes for 2FA setup
+Flask-PyMongo[srv]
+werkzeug
+pyotp
+qrcode[pil]
 python-dotenv
 boto3
 gunicorn
