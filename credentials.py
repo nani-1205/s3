@@ -3,13 +3,18 @@
 from flask import Blueprint, render_template, request, flash, redirect, url_for, current_app
 from flask_login import login_required, current_user
 from bson.objectid import ObjectId
-from crypto import encrypt_data # Import our crypto helpers
+from crypto import encrypt_data
+from admin import admin_required # Import the admin decorator
 
 credentials_bp = Blueprint('credentials', __name__, url_prefix='/credentials')
 
 @credentials_bp.route('/', methods=['GET', 'POST'])
 @login_required
+@admin_required # <-- PROTECTS THIS ENTIRE ROUTE
 def manage():
+    """
+    Allows admins to add new global credentials and view all existing ones.
+    """
     CREDENTIALS_COLLECTION_NAME = current_app.config['CREDENTIALS_COLLECTION_NAME']
     
     if request.method == 'POST':
@@ -23,34 +28,37 @@ def manage():
             # Encrypt the secret key before storing
             encrypted_secret = encrypt_data(secret_key)
             
+            # Insert the new global credential without any user ID
             current_app.db[CREDENTIALS_COLLECTION_NAME].insert_one({
-                'user_id': current_user.id,
-                'username': current_user.username,
                 'profile_name': profile_name,
                 'access_key': access_key,
-                'secret_key_encrypted': encrypted_secret
+                'secret_key_encrypted': encrypted_secret,
+                'added_by': current_user.username # Optional: track who added it
             })
-            flash(f'Credential profile "{profile_name}" saved successfully.', 'success')
+            flash(f'Global credential profile "{profile_name}" was saved successfully.', 'success')
         return redirect(url_for('credentials.manage'))
 
-    # GET request: Show existing credentials for the logged-in user
-    credentials = list(current_app.db[CREDENTIALS_COLLECTION_NAME].find({'user_id': current_user.id}))
-    return render_template('credentials.html', credentials=credentials)
+    # GET request: Fetch ALL credentials to display on the management page
+    all_credentials = list(current_app.db[CREDENTIALS_COLLECTION_NAME].find({}))
+    return render_template('credentials.html', credentials=all_credentials)
 
 @credentials_bp.route('/delete/<credential_id>', methods=['POST'])
 @login_required
+@admin_required # <-- PROTECTS THIS ROUTE
 def delete(credential_id):
+    """
+    Allows admins to delete any global credential.
+    """
     CREDENTIALS_COLLECTION_NAME = current_app.config['CREDENTIALS_COLLECTION_NAME']
     
-    # Ensure the user can only delete their own credentials
+    # Admin can delete any credential by its ID
     result = current_app.db[CREDENTIALS_COLLECTION_NAME].delete_one({
-        '_id': ObjectId(credential_id),
-        'user_id': current_user.id
+        '_id': ObjectId(credential_id)
     })
     
     if result.deleted_count > 0:
         flash('Credential deleted successfully.', 'info')
     else:
-        flash('Credential not found or you do not have permission to delete it.', 'danger')
+        flash('Credential not found.', 'danger')
         
     return redirect(url_for('credentials.manage'))

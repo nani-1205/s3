@@ -3,23 +3,28 @@
 import threading
 import time
 import json
+from datetime import datetime
 from flask import Blueprint, render_template, jsonify, request, Response, stream_with_context, current_app
 from flask_login import login_required, current_user
 from bson.objectid import ObjectId
 import boto3
 import botocore
-from crypto import decrypt_data # Import our crypto helper
+from crypto import decrypt_data
 
 migration_bp = Blueprint('migration', __name__)
 
-# --- Helper to get the current state doc from MongoDB ---
 def get_live_migration_state():
+    """Fetches the live migration state document from MongoDB."""
     MIGRATION_STATE_COLLECTION_NAME = current_app.config['MIGRATION_STATE_COLLECTION_NAME']
     state = current_app.db[MIGRATION_STATE_COLLECTION_NAME].find_one({'_id': 'live_migration_status'})
     return state if state else {'is_running': False}
 
-# --- Core Migration Task (with Checkpointing and Credential Decryption) ---
 def do_migration_with_checkpointing(app_context, migration_id_str, config):
+    """
+    Core migration task. Runs in a background thread.
+    It fetches and decrypts credentials, lists source/destination,
+    and copies files while updating progress in the database.
+    """
     with app_context:
         MIGRATION_HISTORY_COLLECTION_NAME = current_app.config['MIGRATION_HISTORY_COLLECTION_NAME']
         MIGRATION_STATE_COLLECTION_NAME = current_app.config['MIGRATION_STATE_COLLECTION_NAME']
@@ -27,7 +32,7 @@ def do_migration_with_checkpointing(app_context, migration_id_str, config):
         migration_id = ObjectId(migration_id_str)
         
         def log_to_db(level, message):
-            """Helper to log messages to the migration history document."""
+            """Helper to log messages to the migration history document in MongoDB."""
             timestamp = time.time()
             log_entry = {'level': level, 'message': message, 'timestamp': timestamp}
             current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].update_one(
@@ -35,34 +40,29 @@ def do_migration_with_checkpointing(app_context, migration_id_str, config):
                 {'$push': {'logs': {'$each': [log_entry], '$slice': -100}}}
             )
 
-        log_to_db('info', 'Migration task started.')
+        log_to_db('info', 'Migration task started in background.')
         current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].update_one(
             {'_id': migration_id}, {'$set': {'status': 'running', 'start_time': time.time()}}
         )
         
         try:
-            # --- NEW: Fetch and decrypt credentials ---
             def get_credentials(credential_id):
                 if not credential_id:
-                    log_to_db('info', "No credential profile selected. Attempting to use EC2 Instance Role.")
-                    return None, None # Use instance role
-
+                    log_to_db('info', "No credential profile selected. Using EC2 Instance Role (if available).")
+                    return None, None
+                
                 cred_doc = current_app.db[CREDENTIALS_COLLECTION_NAME].find_one({'_id': ObjectId(credential_id)})
                 
                 if not cred_doc:
-                    raise ValueError(f"Credential with ID {credential_id} not found.")
-                
-                # Security check: Make sure the credential belongs to the user who started the migration
-                if cred_doc.get('user_id') != config.get('initiating_user_id'):
-                    raise ValueError(f"Permission denied for credential ID {credential_id}.")
+                    raise ValueError(f"Global credential with ID {credential_id} not found.")
                 
                 access_key = cred_doc['access_key']
                 secret_key = decrypt_data(cred_doc['secret_key_encrypted'])
                 
                 if secret_key == "DECRYPTION_ERROR":
-                     raise ValueError(f"Failed to decrypt secret for credential '{cred_doc['profile_name']}'. The app's SECRET_KEY may have changed.")
+                     raise ValueError(f"Failed to decrypt secret for profile '{cred_doc['profile_name']}'. The app's SECRET_KEY may have changed.")
                 
-                log_to_db('info', f"Using credential profile: {cred_doc['profile_name']}")
+                log_to_db('info', f"Using global credential profile: {cred_doc['profile_name']}")
                 return access_key, secret_key
 
             source_access_key, source_secret_key = get_credentials(config.get('source_credential_id'))
@@ -70,14 +70,12 @@ def do_migration_with_checkpointing(app_context, migration_id_str, config):
 
             source_s3 = boto3.client(
                 's3', region_name=config['source_region'],
-                aws_access_key_id=source_access_key,
-                aws_secret_access_key=source_secret_key,
+                aws_access_key_id=source_access_key, aws_secret_access_key=source_secret_key,
                 config=botocore.client.Config(signature_version='s3v4')
             )
             dest_s3 = boto3.client(
                 's3', region_name=config['dest_region'],
-                aws_access_key_id=dest_access_key,
-                aws_secret_access_key=dest_secret_key,
+                aws_access_key_id=dest_access_key, aws_secret_access_key=dest_secret_key,
                 config=botocore.client.Config(signature_version='s3v4')
             )
             log_to_db('info', 'S3 clients initialized successfully.')
@@ -96,15 +94,13 @@ def do_migration_with_checkpointing(app_context, migration_id_str, config):
             
             source_prefix = config.get('source_prefix', '')
             dest_prefix = config.get('dest_prefix', '')
-            files_to_copy = [obj for obj in all_source_objects if (dest_prefix + obj['Key'][len(source_prefix):]) not in dest_files_map or dest_files_map[dest_prefix + obj['Key'][len(source_prefix):]] != obj['Size']]
+            files_to_copy = [obj for obj in all_source_objects if (dest_prefix + obj['Key'][len(source_prefix):]) not in dest_files_map or dest_files_map.get(dest_prefix + obj['Key'][len(source_prefix):]) != obj['Size']]
             
             total_files_to_copy = len(files_to_copy)
             log_to_db('info', f"Found {len(all_source_objects)} source files. Checkpointing determined {total_files_to_copy} files need to be copied.")
             current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].update_one({'_id': migration_id}, {'$set': {'total_files': total_files_to_copy, 'files_scanned': len(all_source_objects)}})
             
-            if total_files_to_copy == 0:
-                log_to_db('info', "All files are already synchronized.")
-                # Fall through to the finalize step
+            if total_files_to_copy == 0: log_to_db('info', "All files are already synchronized.")
 
             copied_count, failed_count = 0, 0
             for i, obj_to_copy in enumerate(files_to_copy):
@@ -133,13 +129,12 @@ def do_migration_with_checkpointing(app_context, migration_id_str, config):
         finally:
             current_app.db[MIGRATION_STATE_COLLECTION_NAME].update_one({'_id': 'live_migration_status'}, {'$set': {'is_running': False}})
 
-# --- Routes for Migration ---
 @migration_bp.route('/dashboard')
 @login_required
 def dashboard():
     CREDENTIALS_COLLECTION_NAME = current_app.config['CREDENTIALS_COLLECTION_NAME']
-    credentials = list(current_app.db[CREDENTIALS_COLLECTION_NAME].find({'user_id': current_user.id}))
-    return render_template('dashboard.html', credentials=credentials)
+    all_credentials = list(current_app.db[CREDENTIALS_COLLECTION_NAME].find({}))
+    return render_template('dashboard.html', credentials=all_credentials)
 
 @migration_bp.route('/trigger-migration', methods=['POST'])
 @login_required
@@ -151,7 +146,7 @@ def trigger_migration():
         return jsonify({'status': 'error', 'message': 'A migration is already in progress.'}), 409
     
     config = {k: v for k, v in request.form.items()}
-    config['initiating_user_id'] = current_user.id # Add user ID for security check in thread
+    config['initiating_user_id'] = current_user.id
     
     if not all([config.get('source_region'), config.get('source_bucket'), config.get('dest_region'), config.get('dest_bucket')]):
         return jsonify({'status': 'error', 'message': 'Missing required fields: regions and bucket names.'}), 400
@@ -198,12 +193,9 @@ def migration_status_stream():
 @migration_bp.route('/history')
 @login_required
 def history():
-    from datetime import datetime
     MIGRATION_HISTORY_COLLECTION_NAME = current_app.config['MIGRATION_HISTORY_COLLECTION_NAME']
     
-    migrations_cursor = current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].find(
-        {'user_id': current_user.id}
-    ).sort('start_time', -1).limit(50)
+    migrations_cursor = current_app.db[MIGRATION_HISTORY_COLLECTION_NAME].find().sort('start_time', -1).limit(50)
     
     migrations_list = []
     for migration in migrations_cursor:

@@ -80,7 +80,6 @@
             .then(response => response.json().then(data => ({ ok: response.ok, data })))
             .then(({ ok, data }) => {
                 if (!ok) throw new Error(data.message || 'Failed to start migration.');
-                console.log('Migration initiated:', data.message);
             })
             .catch(error => {
                 console.error('Error triggering migration:', error);
@@ -93,7 +92,7 @@
         function connectToStatusStream() {
             if (eventSource) eventSource.close();
             eventSource = new EventSource("{{ url_for('migration.migration_status_stream') }}");
-            eventSource.onopen = () => console.log("Status stream connected.");
+            
             eventSource.onmessage = (event) => {
                 if (event.data.startsWith(':')) return;
                 try {
@@ -143,7 +142,6 @@
             const logContainer = document.getElementById('logContainer');
             if (logContainer) logContainer.scrollTop = logContainer.scrollHeight;
         }
-
         connectToStatusStream();
     });
 </script>
