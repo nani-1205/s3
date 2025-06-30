@@ -23,7 +23,7 @@ def create_app():
     app.config['USERS_COLLECTION_NAME'] = os.getenv("USERS_COLLECTION", "users")
     app.config['MIGRATION_HISTORY_COLLECTION_NAME'] = os.getenv("MIGRATION_HISTORY_COLLECTION", "migration_history")
     app.config['MIGRATION_STATE_COLLECTION_NAME'] = os.getenv("MIGRATION_STATE_COLLECTION", "migration_state")
-    app.config['CREDENTIALS_COLLECTION_NAME'] = os.getenv("CREDENTIALS_COLLECTION", "credentials") # <-- ADDED
+    app.config['CREDENTIALS_COLLECTION_NAME'] = os.getenv("CREDENTIALS_COLLECTION", "credentials")
 
     mongo_host = os.getenv("MONGO_HOST")
     mongo_port = int(os.getenv("MONGO_PORT", 27017))
@@ -51,11 +51,14 @@ def create_app():
     
     from auth import auth_bp
     from migration import migration_bp
-    from credentials import credentials_bp # <-- ADDED
+    from credentials import credentials_bp
+    from admin import admin_bp # <-- ADD THIS IMPORT
+    
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(migration_bp)
-    app.register_blueprint(credentials_bp) # <-- ADDED
-    
+    app.register_blueprint(credentials_bp)
+    app.register_blueprint(admin_bp) # <-- ADD THIS
+
     from models import User
     
     @login_manager.user_loader
@@ -74,7 +77,6 @@ app = create_app()
 
 if __name__ == '__main__':
     with app.app_context():
-        # ... (startup checks are the same as before) ...
         app.db[app.config['MIGRATION_STATE_COLLECTION_NAME']].update_one(
             {'_id': 'live_migration_status'},
             {'$setOnInsert': {'is_running': False, 'last_updated': time.time()}},
@@ -85,7 +87,11 @@ if __name__ == '__main__':
             hashed_password = generate_password_hash('changethispassword')
             otp_secret = pyotp.random_base32()
             app.db[app.config['USERS_COLLECTION_NAME']].insert_one({
-                'username': 'admin', 'password': hashed_password, 'otp_secret': otp_secret, 'otp_confirmed': False
+                'username': 'admin', 
+                'password': hashed_password, 
+                'otp_secret': otp_secret, 
+                'otp_confirmed': False,
+                'is_admin': True  # <-- SET ADMIN FLAG TO TRUE
             })
             app.logger.warning("Default user 'admin' created. PLEASE CHANGE PASSWORD and set up 2FA.")
 

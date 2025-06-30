@@ -10,7 +10,8 @@ class User(UserMixin):
         self.username = user_data.get('username')
         self.password_hash = user_data.get('password')
         self.otp_secret = user_data.get('otp_secret')
-        self.otp_confirmed = user_data.get('otp_confirmed', False) # New field
+        self.otp_confirmed = user_data.get('otp_confirmed', False)
+        self.is_admin = user_data.get('is_admin', False) # <-- ADDED
 
     @staticmethod
     def find_by_username(username):
