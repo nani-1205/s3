@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Migration Dashboard{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+    <!-- Configuration Form -->
+    <div class="form-card">
+        <h2>🚀 New Migration</h2>
+        <form id="migrationForm">
+            <!-- Source Configuration -->
+            <h3>Source Details</h3>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="source_access_key">Source Access Key ID</label>
+                    <input type="password" id="source_access_key" name="source_access_key" class="form-control" placeholder="(Optional, uses role if blank)">
+                </div>
+                <div class="form-group">
+                    <label for="source_secret_key">Source Secret Access Key</label>
+                    <input type="password" id="source_secret_key" name="source_secret_key" class="form-control" placeholder="(Optional, uses role if blank)">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="source_region">Source Region</label>
+                    <input type="text" id="source_region" name="source_region" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="source_bucket">Source Bucket</label>
+                    <input type="text" id="source_bucket" name="source_bucket" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="source_prefix">Source Prefix</label>
+                    <input type="text" id="source_prefix" name="source_prefix" class="form-control">
+                </div>
+            </div>
+            
+            <!-- Destination Configuration -->
+            <hr style="margin: 25px 0; border: 1px solid #eee;">
+            <h3>Destination Details</h3>
+            <div class="form-row">
+                 <div class="form-group">
+                    <label for="dest_access_key">Destination Access Key ID</label>
+                    <input type="password" id="dest_access_key" name="dest_access_key" class="form-control" placeholder="(Optional, uses role if blank)">
+                </div>
+                <div class="form-group">
+                    <label for="dest_secret_key">Destination Secret Access Key</label>
+                    <input type="password" id="dest_secret_key" name="dest_secret_key" class="form-control" placeholder="(Optional, uses role if blank)">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="dest_region">Destination Region</label>
+                    <input type="text" id="dest_region" name="dest_region" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="dest_bucket">Destination Bucket</label>
+                    <input type="text" id="dest_bucket" name="dest_bucket" class="form-control" required>
+                </div>
+                <div class="form-group">
+                    <label for="dest_prefix">Destination Prefix</label>
+                    <input type="text" id="dest_prefix" name="dest_prefix" class="form-control">
+                </div>
+            </div>
+
+            <button type="submit" class="auth-button" id="startButton">Start Migration</button>
+        </form>
+    </div>
+
+    <!-- Status & Logs -->
+    <div class="status-card">
+        <h2>Live Status</h2>
+        <div class="stats-grid">
+            <!-- Stats will be populated by JS -->
+        </div>
+        <div class="progress-section">
+            <!-- Progress bar will be populated by JS -->
+        </div>
+        <div class="current-file" style="display: none;">
+            <!-- Current file will be populated by JS -->
+        </div>
+        <div class="log-section">
+            <div class="log-header">📊 Migration Logs</div>
+            <div id="logContainer"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // The JavaScript to handle the form submission and SSE updates
+    // would be largely similar to the previous dashboard.js logic,
+    // but instead of a simple button click, it would first serialize
+    // the form data and send it in the POST request to /trigger-migration.
+</script>
+{% endblock %}

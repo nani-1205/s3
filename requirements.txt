@@ -1,4 +1,9 @@
 Flask
-boto3
+Flask-Login
+Flask-Bcrypt  # For hashing passwords
+pymongo[srv]  # MongoDB driver
+pyotp         # For 2FA OTP generation
+qrcode[pil]   # For generating QR codes for 2FA setup
 python-dotenv
-gunicorn # Optional: for production-like deployment (but current shared state won't work with multi-worker gunicorn)
+boto3
+gunicorn

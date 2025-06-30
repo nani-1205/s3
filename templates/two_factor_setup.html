@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block title %}2FA Setup{% endblock %}
+
+{% block content %}
+<div class="auth-container">
+    <div class="auth-card">
+        <h1>Set Up 2-Factor Authentication</h1>
+        <p>Scan the QR code below with your authenticator app (e.g., Google Authenticator, Authy).</p>
+        <div class="qr-code-container">
+            <img src="data:image/png;base64,{{ qr_code }}" alt="QR Code for 2FA">
+        </div>
+        <p>After scanning, you will use the code from your app to log in.</p>
+        <a href="{{ url_for('migration.dashboard') }}" class="auth-button">Continue to Dashboard</a>
+    </div>
+</div>
+{% endblock %}
